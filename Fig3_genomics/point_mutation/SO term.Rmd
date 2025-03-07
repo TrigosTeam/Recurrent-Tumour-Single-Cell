@@ -1,0 +1,333 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(RColorBrewer)
+library(gridExtra)
+library(circlize)
+library(scales)
+library(phangorn)
+library(gridExtra)
+library(data.table)
+library(patchwork)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+SO_table <- readRDS("~/CASCADEpaper/paper/Fig3/point_mutation/point_mutation_table_intersection.Rds")
+paths <- system("realpath /trigos_team/CASCADE/Sequencing_updated_reference/CA*/*/purple/*purity.tsv", intern = T)
+paths_split <- data.table::transpose(strsplit(paths, "/"))
+ids <- paths_split[[5]]
+sites <- paths_split[[6]]
+purplereport <- lapply(paths, read_tsv)
+tmb <- unlist(lapply(purplereport , function(x) return(x$tmbPerMb)))
+names(tmb) <- names(SO_table)
+SO_table <- rbindlist(SO_table, idcol = "sample")
+backup <- SO_table
+```
+
+- Y chromosome removed 
+- SGT of normal and tumor are different (need more discussion, not consistent with AD anyway) -- remove this filter 
+- AF_max <0.1 or = NA
+
+```{r}
+SO_table <- SO_table %>%  filter(CHROM != "chrY") %>% filter(as.numeric(MAX_AF)<0.1 | is.na(MAX_AF))
+SGT <- SO_table$SGT
+SGT_df <- as.data.frame(matrix(unlist(strsplit(SGT, "->")), ncol = 2, byrow = T))
+SO_table <- SO_table[which(SGT_df$V1!=SGT_df$V2),]
+
+
+freq_tab <- data.frame(table(SO_table$sample, SO_table$IMPACT)) %>% filter(Freq >0)
+freq_tab2 <- data.frame(table(SO_table$sample, SO_table$VARIANT_CLASS)) %>% filter(Freq >0)
+colnames(freq_tab) <- c("sample", "IMPACT",  "Freq")
+colnames(freq_tab2) <- c("sample", "VARIANT_CLASS",  "Freq")
+plot(freq_tab$Freq~freq_tab$IMPACT)
+freq_tab$log10Freq <- log10(freq_tab$Freq)
+plot(log10(freq_tab$Freq)~freq_tab$IMPACT)
+plot(freq_tab2$Freq~freq_tab2$VARIANT_CLASS)
+
+freq_tab$pathology <- ifelse(grepl("CA0090|CA0046", freq_tab$sample), "NE", ifelse(grepl("CA0027|CA0058", freq_tab$sample), "Mixed", "AD"))
+freq_tab2$pathology <- ifelse(grepl("CA0090|CA0046", freq_tab2$sample), "NE", ifelse(grepl("CA0027|CA0058", freq_tab2$sample), "Mixed", "AD"))
+
+freq_tab$patient <- substr(freq_tab$sample, 1, 6)
+freq_tab2$patient <- substr(freq_tab2$sample, 1, 6)
+
+freq_tab <- freq_tab[freq_tab$patient %in% c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090"),]
+freq_tab2 <- freq_tab2[freq_tab2$patient %in% c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090"),]
+```
+## viriant class distribution 
+```{r}
+"#E41A1C" "#377EB8" "#4DAF4A" "#984EA3" "#FF7F00" "#FFFF33" "#A65628" "#F781BF" "#999999"
+f <- ggplot(freq_tab, aes(y = log10(Freq), x = sample, fill = IMPACT))+
+  geom_bar(stat = "identity", position = "stack",  width = 0.8, alpha = 0.9)+ 
+  #facet_grid(.~patient, scales = "free_x", space = "free")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 7))+
+  labs(x = "sample ID")+theme_bw()+
+  facet_grid(.~pathology, scales = "free", space = "free")+
+  scale_fill_manual(values = c("#E41A1C" ,"#377EB8" ,"#4DAF4A", "#984EA3"))+
+  theme(legend.position = "right", legend.text = element_text(size=7), axis.text.x = element_blank())
+
+p <- ggplot(freq_tab2, aes(y = log10(Freq), x = sample, fill = VARIANT_CLASS))+
+  geom_bar(stat = "identity", position = "stack",  width = 0.8, alpha = 0.9)+ 
+  #facet_grid(.~patient, scales = "free_x", space = "free")+
+  theme_bw()+
+  labs(x = "sample ID")+facet_grid(.~pathology, scales = "free", space = "free")+
+  scale_fill_manual(values = c("#999999", "#A65628", "#F781BF" ))+
+  theme(legend.position = "right", legend.text = element_text(size=7))+theme(axis.text.x = element_blank())
+print(f/p + plot_layout(axes= "collect"))
+```
+```{r fig.height=8, fig.width=6}
+SO_table$Consequence <- paste(SO_table$IMPACT, SO_table$Consequence, sep = "_")
+SO_table$IMPACT <- factor(SO_table$IMPACT, levels = c("HIGH", "MODERATE", "LOW", "MODIFIER"))
+
+mod <- data.frame(sample = freq_tab$sample, Consequence = freq_tab$IMPACT, Freq = freq_tab$Freq) %>% filter(Consequence == "MODIFIER")
+
+df <-  data.frame(table(SO_table$sample, SO_table$Consequence)) %>% filter(Freq >0) 
+colnames(df) <-  c("sample",  "Consequence","Freq")
+df$Consequence <- as.character(df$Consequence)
+df <- df[-grep("MODIFIER", df$Consequence),]
+df <- rbind(df, mod)
+df$patient <- substr(df$sample, 1, 6)
+df$sample <- substring(df$sample, 8)
+df <- df[order(df$Freq, decreasing = T),]
+df$IMPACT <- sapply(df$Consequence, function(x) strsplit(x, "_")[[1]][1])
+df$IMPACT <- factor(df$IMPACT, levels = c("HIGH", "MODERATE", "LOW", "MODIFIER"))
+df$Consequence <- factor(df$Consequence, levels = unique(df$Consequence[order(df$IMPACT)]))
+col_tab <- c(rev(colorRampPalette(tail(brewer.pal(9, "OrRd"), 6))(6)), rev(colorRampPalette(tail(brewer.pal(9, "BuGn"), 4))(3)), rev(colorRampPalette(tail(brewer.pal(9, "Blues"), 4))(3)), "#54278F")
+names(col_tab) <- levels(df$Consequence)
+```
+
+## SO terms distribution across samples
+```{r fig.height=6, fig.width=6}
+g <- ggplot(df, aes(y = log10(Freq), x = sample, fill = Consequence))+
+  geom_bar(stat = "identity", position = "stack",  width = 0.8, alpha = 0.9)+ 
+  facet_grid(.~patient, scales = "free_x", space = "free")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))+
+  labs(x = "sample ID")+
+  theme(legend.position = "none", legend.text = element_text(size=7))+
+  scale_fill_manual(values = as.character(pals::polychrome(36)))
+
+svg("SO_term.svg")
+print(g)
+dev.off()
+  
+```
+
+## p tree based on point mutation
+based on variants: MODIFIER vatirants excluded 
+
+based on variants: CHROM + POS + REF + ALT
+```{r}
+SO_table$Patient <- substr(SO_table$sample, 1, 6)
+SO_table$Sample <- substring(SO_table$sample, 8)
+SO_table$variant <- paste(SO_table$CHROM, SO_table$POS, SO_table$REF, SO_table$ALT, sep = ";")
+data <- SO_table#[SO_table$IMPACT!= "MODIFIER",]
+pa <- unique(SO_table$Patient)
+
+treeUPGMA <- list()
+treeWPGMA <- list()
+treeNJ <- list()
+for ( p in pa){
+  sa <- unique(data$Sample[data$Patient == p])
+  m <- matrix(ncol = length(sa), nrow = length(sa))
+  colnames(m) <- sa
+  rownames(m) <- sa
+  tem <- subset(data, Patient == p)
+  ftab <- data.frame(table(tem$variant, tem$Sample))
+  for ( i in sa){
+    temp1 <- ftab$Freq[ftab$Var2==i]
+    for (n in sa[sa!=i]){
+      temp2 <- ftab$Freq[ftab$Var2==n]
+      m[i, n] <- sum(temp1 != temp2)
+    }
+  }
+  diag(m) <- 0
+  m <- as.dist(m)
+  treeUPGMA[[p]]<- upgma(m)
+  treeWPGMA[[p]]  <- wpgma(m)
+  treeNJ[[p]]  <- NJ(m)
+}
+```
+
+
+```{r fig.height=5, fig.width=9}
+par(mfrow = c(1, 2))
+
+for (i in seq(length(treeUPGMA))){
+  plot(treeUPGMA[[i]], main = paste(names(treeUPGMA[i]), "UPGMA"))
+}
+for (i in seq(length(treeWPGMA))){
+  plot(treeWPGMA[[i]], main = paste(names(treeWPGMA[i]), "WPGMA"))
+}
+for (i in seq(length(treeNJ))){
+  plot(treeNJ[[i]], main = paste(names(treeNJ[i]), "NJ"))
+}
+
+# svg("SO p tree.svg")
+# for (i in seq(length(treeUPGMA))){
+# plot(treeUPGMA[[i]], main = paste(names(treeUPGMA[i]), "UPGMA"))
+# }
+# dev.off()
+```
+## oncoplots 
+genelist source: 
+https://www.nature.com/articles/nrurol.2012.185#Tab4
+https://www.nature.com/articles/s41467-019-13084-7
+
+```{r}
+geneCNA <- readRDS("~/PURPLE/genelist.Rds") 
+geneCNA <- geneCNA[-2]
+for (i in names(geneCNA)){
+  geneCNA[[i]]$sample <- i 
+}
+
+library(ggplot2)
+library(RColorBrewer)
+library(ComplexHeatmap)
+genelist <- read_table("~/somatic_mutation/literature gene list.txt", col_names = F) 
+#The complexity of prostate cancer: genomic alterations and heterogeneity https://www.nature.com/articles/nrurol.2012.185#Tab4
+genelist <- as.vector(genelist$X1)
+genelist<- c(genelist, "AR", "PTEN", "MYC", "NCOA2", "PTK2", "RB1", "APC", "FOXA1", "ZMIZ1", "CCND1", "SIRT1", "NCOR1", "ETV5", "FOXO1", "MDM2", "SPOP", "SOX2", "GSK3B", "PIAS3", "PIAS4", "RAD9A",  "CREB1",  "CREBBP", "CTNNB1","AKT1","AES", #AR regulation 
+             "TP53",  "ZMYM3","PTPRD", "ZFP36L2", "ADAM15",  "BRIP1", "APC", "KMT2C", "CCAR2", "NKX3-1", "C8orf58", "RYBP", #alterned between primary and metatstatic MARCODS2
+             "BRCA1", "BRCA2", "ATM", "BRIP1", "BARD1", "CDK12", "CHEK1", "CHEK2", "FANCL", "PALB2", "PPP2R2A", "RAD51C", "RAD51D", "RAD54L", #HRR PROfound genes RAD51B
+             "BRAC1", "BRAC2", "PALB2", "BRIP", "FANC", "RAD51B", "RAD51C", "RAD51D", "RAD54L", "CHEK1", "ATM", "CDK12", "PALB2", "RAD51", "FANCA", "HDAC2", "BRIP1", "MLH1", "MRE11A", "NBN", # PARP
+           "ABL1","ABL2","ACVR1","ACVR1B","AKT1","AKT2","AKT3","ALK","ALOX12B","ANKRD11","ANKRD26","APC","AR","ARAF","ARFRP1","ARID1A","ARID1B","ARID2","ARID5B","ASXL1","ASXL2","ATM","ATR","ATRX","AURKA","AURKB","AXIN1","AXIN2","AXL","B2M","BAP1","BARD1","BBC3","BCL10","BCL2","BCL2L1","BCL2L11","BCL2L2","BCL6","BCOR","BCORL1","BCR","BIRC3","BLM","BMPR1A","BRAF","BRCA1","BRCA2","BRD4","BRIP1","BTG1","BTK","C11orf30","CALR","CARD11","CASP8","CBFB","CBL","CCND1","CCND2","CCND3","CCNE1","CD274","CD276","CD74","CD79A","CD79B","CDC73","CDH1","CDK12","CDK4","CDK6","CDK8","CDKN1A","CDKN1B","CDKN2A","CDKN2B","CDKN2C","CEBPA","CENPA","CHD2","CHD4","CHEK1","CHEK2","CIC","CREBBP","CRKL","CRLF2","CSF1R","CSF3R","CSNK1A1","CTCF","CTLA4","CTNNA1","CTNNB1","CUL3","CUX1","CXCR4","CYLD","DAXX","DCUN1D1","DDR2","DDX41","DHX15","DICER1","DIS3","DNAJB1","DNMT1","DNMT3A","DNMT3B","DOT1L","E2F3","EED","EGFL7","EGFR","EIF1AX","EIF4A2","EIF4E","EML4","EP300","EPCAM","EPHA3","EPHA5","EPHA7","EPHB1","ERBB2","ERBB3","ERBB4","ERCC1","ERCC2","ERCC3","ERCC4","ERCC5","ERG","ERRFI1","ESR1","ETS1","ETV1","ETV4","ETV5","ETV6","EWSR1","EZH2","FAM123B","FAM175A","FAM46C","FANCA","FANCC","FANCD2","FANCE","FANCF","FANCG","FANCI","FANCL","FAS","FAT1","FBXW7","FGF1","FGF10","FGF14","FGF19","FGF2","FGF23","FGF3","FGF4","FGF5","FGF6","FGF7","FGF8","FGF9","FGFR1","FGFR2","FGFR3","FGFR4","FH","FLCN","FLI1","FLT1","FLT3","FLT4","FOXA1","FOXL2","FOXO1","FOXP1","FRS2","FUBP1","FYN","GABRA6","GATA1","GATA2","GATA3","GATA4","GATA6","GEN1","GID4","GLI1","GNA11","GNA13","GNAQ","GNAS","GPR124","GPS2","GREM1","GRIN2A","GRM3","GSK3B","H3F3A","H3F3B","H3F3C","HGF","HIST1H1C","HIST1H2BD","HIST1H3A","HIST1H3B","HIST1H3C","HIST1H3D","HIST1H3E","HIST1H3F","HIST1H3G","HIST1H3H","HIST1H3I","HIST1H3J","HIST2H3A","HIST2H3C","HIST2H3D","HIST3H3","HLA-A","HLA-B","HLA-C","HNF1A","HNRNPK","HOXB13","HRAS","HSD3B1","HSP90AA1","ICOSLG","ID3","IDH1","IDH2","IFNGR1","IGF1","IGF1R","IGF2","IKBKE","IKZF1","IL10","IL7R","INHA","INHBA","INPP4A","INPP4B","INSR","IRF2","IRF4","IRS1","IRS2","JAK1","JAK2","JAK3","JUN","KAT6A","KDM5A","KDM5C","KDM6A","KDR","KEAP1","KEL","KIF5B","KIT","KLF4","KLHL6","KMT2B","KMT2C","KMT2D","KRAS","LAMP1","LATS1","LATS2","LMO1","LRP1B","LYN","LZTR1","MAGI2","MALT1","MAP2K1","MAP2K2","MAP2K4","MAP3K1","MAP3K13","MAP3K14","MAP3K4","MAPK1","MAPK3","MAX","MCL1","MDC1","MDM2","MDM4","MED12","MEF2B","MEN1","MET","MGA","MITF","MLH1","MLL","MLLT3","MPL","MRE11A","MSH2","MSH3","MSH6","MST1","MST1R","MTOR","MUTYH","MYB","MYC","MYCL1","MYCN","MYD88","MYOD1","NAB2","NBN","NCOA3","NCOR1","NEGR1","NF1","NF2","NFE2L2","NFKBIA","NKX2-1","NKX3-1","NOTCH1","NOTCH2","NOTCH3","NOTCH4","NPM1","NRAS","NRG1","NSD1","NTRK1","NTRK2","NTRK3","NUP93","NUTM1","PAK1","PAK3","PAK7","PALB2","PARK2","PARP1","PAX3","PAX5","PAX7","PAX8","PBRM1","PDCD1","PDCD1LG2","PDGFRA","PDGFRB","PDK1","PDPK1","PGR","PHF6","PHOX2B","PIK3C2B","PIK3C2G","PIK3C3","PIK3CA","PIK3CB","PIK3CD","PIK3CG","PIK3R1","PIK3R2","PIK3R3","PIM1","PLCG2","PLK2","PMAIP1","PMS1","PMS2","PNRC1","POLD1","POLE","PPARG","PPM1D","PPP2R1A","PPP2R2A","PPP6C","PRDM1","PREX2","PRKAR1A","PRKCI","PRKDC","PRSS8","PTCH1","PTEN","PTPN11","PTPRD","PTPRS","PTPRT","QKI","RAB35","RAC1","RAD21","RAD50","RAD51","RAD51B","RAD51C","RAD51D","RAD52","RAD54L","RAF1","RANBP2","RARA","RASA1","RB1","RBM10","RECQL4","REL","RET","RFWD2","RHEB","RHOA","RICTOR","RIT1","RNF43","ROS1","RPS6KA4","RPS6KB1","RPS6KB2","RPTOR","RUNX1","RUNX1T1","RYBP","SDHA","SDHAF2","SDHB","SDHC","SDHD","SETBP1","SETD2","SF3B1","SH2B3","SH2D1A","SHQ1","SLIT2","SLX4","SMAD2","SMAD3","SMAD4","SMARCA4","SMARCB1","SMARCD1","SMC1A","SMC3","SMO","SNCAIP","SOCS1","SOX10","SOX17","SOX2","SOX9","SPEN","SPOP","SPTA1","SRC","SRSF2","STAG1","STAG2","STAT3","STAT4","STAT5A","STAT5B","STK11","STK40","SUFU","SUZ12","SYK","TAF1","TBX3","TCEB1","TCF3","TCF7L2","TERC","TERT","TET1","TET2","TFE3","TFRC","TGFBR1","TGFBR2","TMEM127","TMPRSS2","TNFAIP3","TNFRSF14","TOP1","TOP2A","TP53","TP63","TRAF2","TRAF7","TSC1","TSC2","TSHR","U2AF1","VEGFA","VHL","VTCN1","WISP3","WT1","XIAP","XPO1","XRCC2","YAP1","YES1","ZBTB2","ZBTB7A","ZFHX3","ZNF217","ZNF703","ZRSR2")  #TSO500
+             
+             
+genelist <- unique(genelist)
+rm_gene <- unique(unlist(lapply (geneCNA, function(x) genelist[which(!(genelist%in% x$gene))])))
+genelist <- genelist[!genelist%in%rm_gene]
+```
+"MLL2"   "DICER"  "NKX3.1" "AES"  not in the PURPLE list (not included in the genome referece wiht only exon)
+CN matrix 
+```{r CN matrix, include=FALSE}
+CN.mat <- lapply(geneCNA, function(x){
+  temp <- x[x$gene%in% genelist, c("gene", "CN")]
+  colnames(temp) <- c("gene", unique(x$sample))
+  return(temp)
+})
+CN.mat <- CN.mat %>% Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="gene"), .) 
+CN.mat <- as.matrix(CN.mat)
+rownames(CN.mat) <- CN.mat[,1]
+CN.mat <- CN.mat[,2:ncol(CN.mat)]
+rev(colorRampPalette(brewer.pal(9, "RdBu"))(9))
+col.CN <- c("#5DA3CC", "#BCDAEA", "#F7F7F7", "#FDDBC7" ,"#F4A582", "#D6604D", "#B2182B")
+names(col.CN) <- as.character(0:6)
+class(CN.mat) <- "numeric"
+gene_order <- rownames(CN.mat)[heatmap(CN.mat)$rowInd]
+sample_order <- colnames(CN.mat)[heatmap(CN.mat)$colInd]
+CN.list <- list("0" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["0"]),
+                "1" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["1"]),
+                "2" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["2"]),
+                "3" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["3"]),
+                "4" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["4"]),
+                "5" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["5"]),
+                "6" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["6"]))
+test_alter_fun(CN.list)
+```
+gene fusion matrix 
+```{r genefusion}
+genefusion <- readRDS("~/somatic_mutation/gene fusion/genefusion_nona_noreplicates_noinverts.Rds")
+f_genf <- lapply(genefusion, function(x) return(grep("TMPRSS2|ETV", x$fusion, value = T)))
+TMPRSS2_ERG_fusion =  rep("Y", 7)
+genf_anno <- list("Y"= alter_graphic("rect", width = 0.9, height = 0.9, fill = "black"),
+                  "N" = alter_graphic("rect", width = 0.9, height = 0.9, fill = "grey"))
+
+WGD = c( rep("N", 5),rep("Y", 2))
+names(WGD) <- sample_order
+
+```
+
+Viriant class matrix 
+```{r point mutation}
+f_SO <- SO_table[SO_table$SYMBOL%in%genelist,] %>% filter(IMPACT %in% c("HIGH", "MODERATE"))
+f_SO$IMPACT <- factor(f_SO$IMPACT, levels = c("HIGH", "MODERATE", "LOW", "MODIFIER"))
+SM.mat <- CN.mat
+class(SM.mat) <- "character"
+for(i in rownames(CN.mat)){
+  for( n in colnames(CN.mat)){
+    cons <- f_SO[f_SO$SYMBOL == i & f_SO$sample == n,]
+    cons <- cons[order(cons$IMPACT, decreasing = T), ]
+    cons <- head(cons$Consequence, 1)
+    if(length(cons)>0){
+      SM.mat[i, n] <- paste(SM.mat[i,n], cons, sep = ";")
+    }
+  }
+}
+
+SO_col <- c("violetred3", "orangered", "seagreen")
+names(SO_col) <- c("HIGH_frameshift_variant","HIGH_splice_acceptor_variant", "MODERATE_missense_variant")
+
+SO_anno <- list("HIGH_frameshift_variant"= alter_graphic("rect", width = 0.4, height = 0.9, fill = "violetred2"),
+                "HIGH_splice_acceptor_variant"= alter_graphic("rect", width = 0.4, height = 0.9, fill = "orangered"),
+                "MODERATE_missense_variant" = alter_graphic("rect", width = 0.4, height = 0.9, fill ="seagreen"))
+
+```
+
+insertion and deletion matrix not use, too ugly 
+```{r indel }
+indel.mat <- SM.mat
+for(i in rownames(CN.mat)){
+  for( n in colnames(CN.mat)){
+    cons <- f_SO[f_SO$SYMBOL == i & f_SO$sample == n,]
+    cons <- unique(cons$VARIANT_CLASS)
+    cons <- cons[cons%in%c("insertion", "deletion")]
+    if(length(cons)>0){
+    cons <- paste(cons, collapse = ";")
+    indel.mat[i, n] <- paste(indel.mat[i,n], cons, sep = ";")
+    }
+  }
+}
+
+indel_anno <- list(insertion = function(x, y, w, h) 
+        grid.points(x, y, pch = 16),
+    # crossed lines
+    deletion = function(x, y, w, h) {
+        grid.segments(x - w*0.4, y - h*0.4, x + w*0.4, y + h*0.4, gp = gpar(lwd = 2))
+        grid.segments(x + w*0.4, y - h*0.4, x - w*0.4, y + h*0.4, gp = gpar(lwd = 2))
+    })
+
+
+```
+
+
+
+
+```{r}
+lgd1 = Legend(at = 0:6, title = "CNA", legend_gp = gpar(fill = col.CN))
+lgd2 = Legend(at = c("Yes", "No"), title = "Gene fusion/WGD", legend_gp = gpar(fill = c("Yes" = "black", "No" = "grey")))
+lgd3 = Legend(labels = names(SO_col), title = "SNV consequence", legend_gp = gpar(fill = SO_col))
+pd <- packLegend(lgd1, lgd2, lgd3)
+```
+
+```{r mat, fig.height=10, fig.width=6, warning=FALSE}
+mat <- rbind(SM.mat, TMPRSS2_ERG_fusion, WGD)
+alter_fun <- c(background = function(...) NULL,CN.list, genf_anno, SO_anno)
+gene_order <- c(gene_order, "TMPRSS2_ERG_fusion", "WGD")
+
+
+```
+
+
+
+```{r onco, fig.height=12, fig.width=7, message=FALSE, warning=FALSE}
+onc <- oncoPrint(mat, alter_fun = alter_fun, 
+          col = c(col.CN, SO_col), show_column_names = TRUE, row_names_gp = gpar(fontsize = 8), show_pct = F, row_names_side = "left", row_order =gene_order, column_order =  sample_order, 
+          top_annotation = HeatmapAnnotation( TMB_per_Mb =  anno_barplot(tmb), CN_composition = anno_oncoprint_barplot(as.character(0:6)),
+            height = unit(2, "cm"),  annotation_name_gp = gpar(fontsize =8), show_annotation_name = T, gap = unit(2, "mm")),
+    right_annotation = NULL,
+    left_annotation = rowAnnotation(legend = anno_empty(border = F), width = unit(5, "cm"), height = unit(10, "cm")))
+
+svg("onco plot.svg", width = 7, height = 12)
+draw(onc, show_heatmap_legend = F)
+
+draw(pd, x = unit(7, "cm"), y = unit(20, "cm"),just = c("right"), test = F)
+dev.off()
+```

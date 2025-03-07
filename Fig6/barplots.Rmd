@@ -1,0 +1,273 @@
+---
+title: "barplots"
+output: html_document
+date: '2023-11-27'
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(pals)
+library(readr)
+library(data.table)
+library(dplyr)
+library(scales)
+library(colorspace)
+library(Seurat)
+library(patchwork)
+ normal_final_srt <- readRDS("~/CASCADEpaper/paper/Fig6/normal_finalv2_srt.Rds")
+normal_final_srt$pathology <- ifelse(normal_final_srt$patient %in% c("CA0090", "CA0046"), "NE", ifelse(normal_final_srt$patient %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+normal_final_srt$cell_type <- ifelse(normal_final_srt$cell_id2%in% c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage"), "immune cells", "stromal cells")
+DimPlot(normal_final_srt, group.by = "cell_id2", label = T)
+DimPlot(normal_final_srt, cells.highlight = colnames(normal_final_srt)[normal_final_srt$cell_id2 == "Neuron"])
+DimPlot(normal_final_srt, cells.highlight = colnames(normal_final_srt)[normal_final_srt$cell_id2 == "Hepatocyte"])
+```
+
+
+```{r fig.height=7, fig.width=10}
+
+df <- normal_final_srt@meta.data %>% group_by(sample, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$patient <- gsub("00", "", substr(df$sample, 1, 6))
+df$pathology <- ifelse(df$patient %in% c("CA90", "CA46"), "NE", ifelse(df$patient %in% c("CA27", "CA58"), "Mixing", "AD"))
+df$cell_type <- ifelse(df$cell_id2%in% c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage"), "immune cells", "stromal cells")
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Macrophage", "Erythroblast", "Epithelial cell","Chondrocyte", "Fibroblast", "Myofibroblast","Lipofibroblast"  ,"Endothelial cell", "Hepatocyte", "Neuron"))
+
+ggplot(df, aes(x = sample, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  facet_grid(.~pathology+patient, scales = "free", space = "free") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13))
+
+```
+FOLH1 scatter plots with cell type pro
+```{r fig.height=6, fig.width=7}
+meta_expression <- readRDS("~/integration/tumor_only_meta_expression.Rds")
+meta_expression <- meta_expression %>% group_by(sample) %>% mutate(avg = mean(FOLH1), med = median(FOLH1))
+meta <- meta_expression[, c("sample", "avg", "med")] %>% distinct()
+head(meta)
+head(df)
+
+meta <- merge(meta, df, by = "sample", all = T )
+meta <- meta[!is.na(meta$cell_id2), ]
+meta$cell_id2 <- as.character(meta$cell_id2)
+for(m in unique(meta$sample)){
+  for (n in unique(meta$cell_id2)){
+    meta$cor[meta$sample == m & meta$cell_id2==n] <- cor(meta[meta$sample == m & meta$cell_id2 == n, "freq"], meta[meta$sample == m & meta$cell_id2 == n, "avg"])
+  }
+}
+  
+ g <- ggplot(meta, aes(x = freq, y = avg, color = cell_id2))+
+    geom_point(alpha = 0.3) + 
+    geom_smooth(method=lm, se=FALSE, fullrange=TRUE)+
+    facet_wrap(.~cell_id2)+
+   scale_color_manual(values = brewer.accent(13), name = "cell id")+
+    theme_bw()+
+   labs(y = "average expression of FOLH1", x="proportion of cell type")
+print(g)
+
+```
+```{r}
+ggplot(meta, aes(x = freq, y = avg, color = cell_id2))+
+    geom_point(alpha = 0.3) + 
+    geom_smooth(method=lm, se=FALSE, fullrange=TRUE)+
+   scale_color_manual(values = brewer.accent(13), name = "cell type")+
+    theme_bw() + labs(y = "average expression of FOLH1", x= "proportion of cell type")
+```
+
+```{r}
+
+meta <- meta_expression[, c("sample", "avg", "med")] %>% distinct()
+head(meta)
+bins  <- ntile(meta$avg, 5)
+names(bins) <- meta$sample
+
+head(df)
+
+df$FOLH1_bin <-  bins[df$sample]
+
+ggplot(df, aes(x = FOLH1_bin, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13), name = "cell type") +
+  labs(x = "FOLH1 average expression tile", y = "proportion of cell type")
+```
+```{r, fig.height=15, fig.width=8}
+head(df)
+p_val <- c()
+for (i in unique(df$cell_id2)[-c( 5, 8, 13)]){
+  p <- DescTools::JonckheereTerpstraTest(df$freq[df$cell_id2 == i], g = as.factor(df$FOLH1_bin[df$cell_id2 == i]), alternative = "increasing", nperm = 5000)
+  p_val <- c(p_val, p$p.value)
+}
+names(p_val) <- unique(df$cell_id2)[-c( 5, 8, 13)]
+p_val
+df$JT_p <- p_val[as.character(df$cell_id2)]
+df$lab <- paste0(df$cell_id2, ":", df$JT_p)
+
+g1<- ggplot(df %>% filter(cell_type == "immune cells"), aes(x = as.factor(FOLH1_bin), y = freq)) + 
+  facet_grid(lab~cell_type, space = "free_x", scales = "free")+
+  geom_boxplot(outlier.shape = NA) + geom_jitter(aes(colour = patient)) + scale_color_manual(values = brewer.accent(13))+theme_bw()+labs(x = "FOLH1 quantile", y = "cell type proportion")
+g2<- ggplot(df %>% filter(cell_type == "stromal cells"), aes(x = as.factor(FOLH1_bin), y = freq)) + 
+  facet_grid(lab~cell_type, space = "free_x", scales = "free")+
+  geom_boxplot(outlier.shape = NA) + geom_jitter(aes(colour = patient)) + scale_color_manual(values = brewer.accent(13))+theme_bw()+labs(x = "FOLH1 quantile", y = "cell type proportion")
+design <- "
+  12
+  #2
+"
+g1+g2+plot_layout(design = design,guides = "collect", axis_titles = "collect")
+```
+
+
+
+```{r}
+df <- normal_final_srt@meta.data %>% group_by(patient, site, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+head(df)
+df$patient <- gsub("00", "", df$patient)
+df$pathology <- ifelse(df$patient %in% c("CA90", "CA46"), "NE", ifelse(df$patient %in% c("CA27", "CA58"), "Mixed", "AD"))
+df$cell_type <- ifelse(df$cell_id2%in% c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage"), "immune cells", "stromal cells")
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Macrophage", "Erythroblast", "Epithelial cell","Chondrocyte", "Fibroblast", "Myofibroblast","Lipofibroblast"  ,"Endothelial cell", "Hepatocyte", "Neuron"))
+
+ggplot(df, aes(x = site, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  facet_grid(.~pathology+patient, scales = "free", space = "free") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13), name = "cell type")
+```
+
+
+
+```{r fig.height=5, fig.width=3}
+df <- normal_final_srt@meta.data %>% group_by(site, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+df$cell_type <- ifelse(df$cell_id2%in% c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage"), "immune cells", "stromal cells")
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Macrophage", "Erythroblast", "Epithelial cell","Chondrocyte", "Fibroblast", "Myofibroblast","Lipofibroblast"  ,"Endothelial cell", "Hepatocyte", "Neuron"))
+
+
+ggplot(df, aes(x = site, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90), legend.position = "none") + 
+  scale_fill_manual(values = brewer.accent(13))
+
+ggplot(df, aes(x = site, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  facet_grid(cell_type~., scales = "free", space = "free") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13))
+
+```
+
+```{r fig.height=4, fig.width=6}
+df <- normal_final_srt@meta.data %>% group_by(site, cell_type) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+ggplot(df, aes(x = site, y = freq, fill = cell_type)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.set2(5))
+
+```
+
+
+
+
+```{r fig.height=5, fig.width=7}
+df <- normal_final_srt@meta.data %>% group_by(pathology, site, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Macrophage", "Erythroblast", "Epithelial cell","Chondrocyte", "Fibroblast", "Myofibroblast","Lipofibroblast"  ,"Endothelial cell", "Hepatocyte", "Neuron"))
+
+ggplot(df, aes(x = freq, y = pathology, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 0), legend.position = "none", strip.text.y.right = element_text(size = 8, angle = 0)) +
+  facet_grid(site~., scale = "free", space = "free")+
+  scale_fill_manual(values = brewer.accent(13))
+
+ggplot(df, aes(x = site, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) +
+  facet_grid(.~pathology, scale = "free", space = "free")+
+  scale_fill_manual(values = brewer.accent(13))
+
+
+```
+```{r fig.height=5, fig.width=3}
+df <- normal_final_srt@meta.data %>% group_by(pathology, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Macrophage", "Erythroblast", "Epithelial cell","Chondrocyte", "Fibroblast", "Myofibroblast","Lipofibroblast"  ,"Endothelial cell", "Hepatocyte", "Neuron"))
+ggplot(df, aes(x = pathology, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13))
+
+df <- normal_final_srt@meta.data %>% group_by(pathology, cell_type) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+ggplot(df, aes(x = pathology, y = freq, fill = cell_type)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.set2(5))
+```
+
+
+```{r fig.height=7, fig.width=10}
+
+
+
+df <- normal_final_srt@meta.data %>% group_by(patient,site, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+ggplot(df, aes(x = site, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  facet_grid(.~ patient, scales = "free", space = "free") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values =  brewer.accent(13))
+
+```
+
+
+## normal cell number adjusted by whole genome tumor purity
+
+it cannot be done as CA0035 doesnot have WGS
+pathology review lack info for CA58, CA83, CA90
+
+```{r fig.height=7, fig.width=10}
+paths <- system("realpath /trigos_team/CASCADE/Sequencing_updated_reference/CA*/*/purple/*purity.tsv", intern = T)
+paths <- paths[-9] # CA35 choose 1A
+paths <- paths[-28]
+paths_split <- data.table::transpose(strsplit(paths, "/"))
+ids <- paths_split[[5]]
+sites <- paths_split[[6]]
+sites[8] <- "paraaortic_lymph_node_1"
+sites[7] <- "bladder_2"
+wgd <- lapply(paths, read_tsv)
+names(wgd) <- paste(ids, sites, sep = "_")
+wgd <- rbindlist(wgd,idcol= "sample") 
+head(wgd)
+purity <- structure(wgd$purity, names = wgd$sample)
+purity[purity == 1] <- 0.99
+
+normal_final_srt$purity <- purity[normal_final_srt$sample]
+df <- normal_final_srt@meta.data %>% group_by(sample, purity, cell_id2) %>% summarise(n = n()) %>% mutate (adj_n = n/(1-purity))
+df$patient <- substr(df$sample, 1, 6)
+df$cell_type <- ifelse(df$cell_id2%in% c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast"), "immune cells", "stromal cells")
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast", "Epithelial cell", "Adipocyte","Chondrocyte", "Smooth muscle", "Fibroblast", "Endothelial cell", "Hepatocyte", "Neuron"))
+head(df)
+
+ggplot(df, aes(x = sample, y = adj_n, fill = cell_id2)) + geom_bar(stat = "identity") + 
+    facet_grid(.~pathology+patient, scales = "free", space = "free") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13))
+
+df <- normal_final_srt@meta.data %>% group_by(sample, cell_id2) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$patient <- substr(df$sample, 1, 6)
+df$pathology <- ifelse(df$patient %in% c("CA0090", "CA0046"), "NE", ifelse(df$patient %in% c("CA0027", "CA0058"), "Mixing", "AD"))
+df$cell_type <- ifelse(df$cell_id2%in% c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast"), "immune cells", "stromal cells")
+df$cell_id2 <- factor(df$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast", "Epithelial cell", "Adipocyte","Chondrocyte", "Smooth muscle", "Fibroblast", "Endothelial cell", "Hepatocyte", "Neuron"))
+
+ggplot(df, aes(x = sample, y = freq, fill = cell_id2)) + geom_bar(stat = "identity") + 
+  facet_grid(.~pathology+patient, scales = "free", space = "free") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.accent(13))
+```
+
+
+
+```{r}
+#library(vegan)
+
+df <- as.data.frame.matrix(table( normal_final_srt$sample,  normal_final_srt$cell_id2))
+
+head(df)
+df.immune <- df[,colnames(df) %in% c("T cell","B cell","Plasma cell","Macrophage")]
+head(df.immune)
+diversity_ind <- diversity(df.immune)
+barplot(diversity_ind)
+```
+```{r}
+tb_site <- table(normal_final_srt)
+```
+
+correlate with FOLH1 expression
+```{r}
+
+```
+

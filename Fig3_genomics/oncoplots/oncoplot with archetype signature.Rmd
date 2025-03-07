@@ -1,0 +1,237 @@
+---
+title: "oncoplots with limited genelist"
+output: html_notebook
+---
+
+
+```{r set up, include=FALSE}
+geneCNA <- readRDS("~/Desktop/plot_local/oncoplots/geneCNAlist.Rds")
+# geneCNA <- geneCNA[-9]
+# names(geneCNA)[8] <- "CA0035_paraaortic_lymph_node_1"
+
+for (i in names(geneCNA)){
+  geneCNA[[i]]$sample <- i 
+}
+library(dendextend)
+library(ggplot2)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+library(dplyr)
+library(data.table)
+library(pals)
+
+sv <- readRDS("~/Desktop/plot_local/oncoplots/sv_list.Rds")
+SO_table <- readRDS("~/Desktop/plot_local/oncoplots/point_mutation_table_intersect.Rds")
+```
+
+### genelist generated
+```{r eval=FALSE, include=FALSE}
+heatmap_marker <- readRDS("~/Desktop/plot_local/archetype/heatmap_marker.Rds")
+genelist <- unlist(heatmap_marker)
+length(genelist)
+genelist
+```
+"C11orf30" "FAM123B"  "FAM175A"  "FAM46C"   "GPR124"   "MLL"      "MRE11A"   "MYCL1"    "PAK7"     "PARK2"    "RFWD2"    "TCEB1"    "WISP3"
+not included because lack CN annotation 
+
+
+
+## CN matrix
+```{r CN matrix, include=FALSE}
+CN.mat <- lapply(geneCNA, function(x){
+  temp <- x[x$gene%in% genelist, c("gene", "CN")]
+  if(any(temp$CN >=10)){
+    temp$CN[temp$CN>=10] <- 10
+  }
+  colnames(temp) <- c("gene", unique(x$sample))
+  return(temp)
+})
+
+CN.mat <- CN.mat %>% Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="gene"), .) 
+CN.mat <- as.matrix(CN.mat)
+rownames(CN.mat) <- CN.mat[,1]
+CN.mat <- CN.mat[,2:ncol(CN.mat)]
+
+
+rev(colorRampPalette(brewer.pal(9, "RdBu"))(9))
+col.CN <- c("#5DA3CC", "#BCDAEA", "#F7F7F7", tail(rev(colorRampPalette(brewer.pal(9, "RdBu"))(17)), 8))
+names(col.CN) <- c(as.character(0:10))
+# col.CN = colorRamp2(c(0,2,25), c("#5DA3CC", "#F7F7F7", "#B2182B"))
+class(CN.mat) <- "numeric"
+gene_order <- order.dendrogram(as.dendrogram(hclust(dist(CN.mat))))
+sample_order <- order.dendrogram(as.dendrogram(hclust(dist(t(CN.mat)))))
+# CN.list <- list("0" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["0"]),
+#                 "1" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["1"]),
+#                 "2" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["2"]),
+#                 "3" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["3"]),
+#                 "4" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["4"]),
+#                 "5" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["5"]),
+#                 "6" = alter_graphic("rect", width = 0.9, height = 0.9, fill = col.CN["6"]))
+CN.list <- lapply(col.CN, function(x) return(alter_graphic("rect", width = 0.9, height = 0.9, fill = x)))
+# test_alter_fun(CN.list)
+```
+
+## sv matrix 
+```{r structure variant}
+f_sv <- rbindlist(sv, idcol = "sample")
+SV.mat <- CN.mat
+class(SV.mat) <- "character"
+for(i in rownames(CN.mat)){
+  for( n in colnames(CN.mat)){
+    cons <- f_sv %>% filter(sample == n) 
+    cons <- cons[union(which(sapply(strsplit(cons$start_gene, ";"), function(x) i%in%x)), which(sapply(strsplit(cons$end_gene, ";"), function(x) i%in%x))),]
+    if(nrow(cons)>0){
+      SV.mat[i, n] <- paste(c(SV.mat[i,n], unique(cons$sv)), collapse  = ";")
+    }
+  }
+}
+
+
+SV_anno <- list(
+  inversion = function(x, y, w, h) 
+        grid.rect(x, y, w*0.9, h*0.9, gp = gpar(fill = NA, lwd = 1)),
+  translocation = function(x, y, w, h) 
+        grid.segments(x + w*0.4, y , x - w*0.4, y , gp = gpar(lwd = 1)),
+  tandem_duplication= function(x, y, w, h) 
+        grid.segments(x - w*0.4, y - h*0.4, x + w*0.4, y + h*0.4, gp = gpar(lwd = 1)),
+  deletion = function(x, y, w, h) 
+       grid.segments(x + w*0.4, y - h*0.4, x - w*0.4, y + h*0.4, gp = gpar(lwd = 1)),
+  insertion = function(x, y, w, h) 
+        grid.segments(x , y - h*0.4, x , y + h*0.4, gp = gpar(lwd = 1))
+)
+test_alter_fun(SV_anno)
+
+
+```
+## wholegenome doubling 
+```{r include=FALSE}
+genf_anno <- list("TURE"= alter_graphic("rect", width = 0.9, height = 0.9, fill = "black"),
+                  "FALSE" = alter_graphic("rect", width = 0.9, height = 0.9, fill = "grey"))
+wgd <- readRDS("~/Desktop/plot_local/oncoplots/wgd.Rds")
+```
+
+## Viriant class matrix 
+```{r point mutation, message=FALSE, warning=FALSE, include=FALSE}
+
+SO_table <- rbindlist(SO_table, idcol = "sample")
+SO_table <- SO_table[, 1:23]
+SO_table <- distinct(SO_table)
+
+f_SO <- SO_table[SO_table$SYMBOL%in%genelist,] %>% filter(IMPACT %in% c("HIGH", "MODERATE"))
+# f_SO$IMPACT <- factor(f_SO$IMPACT, levels = c("HIGH", "MODERATE", "LOW", "MODIFIER"))
+SM.mat <- SV.mat
+class(SM.mat) <- "character"
+f <- c()
+for(i in rownames(CN.mat)){
+  for( n in colnames(CN.mat)){
+    cons <- f_SO[f_SO$SYMBOL == i & f_SO$sample == n,]
+    if(length(unique(cons$IMPACT)) == 1){
+      temp <- unlist(strsplit(cons$Consequence, split = "&"))
+      temp <- names(which.max(table(temp)))
+      SM.mat[i, n] <- paste(SM.mat[i,n], temp, sep = ";")
+    }else{
+      ind <-  which(c("HIGH", "MODERATE") %in% cons$IMPACT)
+      temp <- unlist(strsplit(cons$Consequence[cons$IMPACT == c("HIGH", "MODERATE", "MODIFIER")[min(ind)]], split = "&"))
+      temp <- names(which.max(table(temp)))
+      SM.mat[i, n] <- paste(SM.mat[i,n], temp, sep = ";")
+    }
+    f <- c(f, temp)
+  }
+}
+
+SO_col <- c("deeppink", "tan1", "purple")
+names(SO_col) <- unique(f)
+SO_anno <- lapply(SO_col, function(x) return(alter_graphic("rect", width = 0.4, height = 0.4, fill = x)))
+```
+
+
+general matrix generation
+```{r mat, fig.height=10, fig.width=6, warning=FALSE}
+mat <- rbind(SM.mat)
+mat <- mat[,c(1:8, 10:34)]
+#mat <- mat[gene_order, ]
+row_col <- rep("black", nrow(mat))
+row_col[which(rownames(mat)%in%DDR)] <- "red"
+mat2 <- mat[genelist[genelist%in%rownames(mat)], ]
+gene_order <- order.dendrogram(as.dendrogram(hclust(dist(CN.mat[genelist[genelist%in%rownames(mat)],]))))
+
+alter_fun <- c(background = function(...) NULL,CN.list, SO_anno,SV_anno)
+# gene_order <- c(gene_order, "TMPRSS2_ERG_fusion", "WGD")
+
+
+
+sample_order2 = c("CA0034_liver_left_11" , "CA0034_liver_left_11" , "CA0034_liver_right_8" ,  
+                 "CA0090_abdomen_13"  , "CA0090_liver_43","CA0090_brain_2"  ,   "CA0090_paraaortic_lymph_node_39", "CA0090_porta_hepatis_lymph_node_52",
+                 "CA0046_hilar_lymph_node_5" ,  "CA0046_liver_12" , "CA0046_lung_7","CA0046_paraaortic_lymph_node_15","CA0046_pelvic_lymph_node_19" , "CA0046_prostate_17", 
+                 "CA0035_bladder_base_2"  ,"CA0035_left_paraaortic_lymph_node_track_1A" ,"CA0035_left_paraaortic_lymph_node_track_1B",
+                 "CA0043_liver_12","CA0043_liver_7", "CA0043_portal_lymph_node_4" ,
+                 "CA0076_left_rib_17" , "CA0076_liver_right_40"  ,"CA0076_vertebra_25",
+                 "CA0058_hilar_50"  , "CA0058_liver_29","CA0058_liver_38",
+                   "CA0027_paraaortic_lymph_node_1"  , "CA0027_dura_base_skull_13" ,  "CA0027_prostate_9",
+                 "CA0083_lung_55" , "CA0083_paraaortic_lymph_node_12" ,"CA0083_liver_49","CA0083_hilar_lymph_node_47"  , "CA0083_perinephric_fat_19"
+                 )
+patients <- substr(colnames(mat), 1, 6)
+pathology <- ifelse(patients %in% c("CA0090", "CA0046"), "NE", ifelse(patients %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+patients <- gsub("00", "", substr(colnames(mat), 1, 6))
+
+rowanno <- c(rep("stree",10), rep("NE",10), rep("cycling",10), rep("inflammation",10), rep("hypoxia",10),rep("AR",10))
+
+```
+
+##legend setting
+```{r}
+lgd1 = Legend(at = c(as.character(0:9), ">=10"), title = "CNA", legend_gp = gpar(fill = col.CN))
+lgd2 = Legend(at = c("Yes", "No"), title = "WGD", legend_gp = gpar(fill = c("Yes" = "black", "No" = "grey")))
+lgd3 = Legend(labels = gsub("_", " ", names(SO_col)), title = "SNV consequence",graphics = SO_anno)
+lgd4 = Legend(labels = c("inversion","translocation", "tandem duplication" ,"deletion" , "insertion"), title = "Structure variants", 
+              graphics = SV_anno)
+lgd5 = Legend(at = unique(patients), title = "Patients", legend_gp = gpar(fill = brewer.set3(length(unique(patients)))))
+pd <- packLegend(lgd1, lgd3, lgd4)
+draw(pd)
+```
+```{r}
+sites<- gsub("CA[0-9]+_","", colnames(mat2))
+
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+```
+
+right_annotation = NULL,
+    left_annotation = rowAnnotation(legend = anno_empty(border = F), width = unit(5, "cm"), height = unit(10, "cm"))
+```{r onco, fig.height=10, fig.width=11, message=FALSE, warning=FALSE}
+onc <- oncoPrint(mat2, alter_fun = alter_fun, name = "part1", 
+          col = c(col.CN, SO_col), show_column_names = F, row_names_gp = gpar(fontsize = 7),show_pct = F, row_names_side = "left",
+          row_order =  gene_order, column_split = pathology, column_order = colnames(mat2),
+          top_annotation = HeatmapAnnotation(WGD = wgd[-9], col = list(WGD = c("TRUE" = "black", "FALSE" = "grey")),
+                                             CN_composition = anno_oncoprint_barplot(as.character(0:10)),
+                                             annotation_height =  unit(c(5,10), "mm") , annotation_name_gp = gpar(fontsize =7), show_annotation_name = T, gap = unit(1, "mm")), 
+          bottom_annotation = HeatmapAnnotation(Patient = patients, Site = sites, col = list(Patient = structure(brewer.set1(length(unique(patients))), names = unique(patients)), Site = structure(brewer.set3(length(unique(sites))), names = unique(sites)))), 
+          row_split = rowanno, border = T, row_title_gp = gpar(fontsize = 9, fontface = "bold")
+          
+    )
+
+
+
+draw(onc, show_heatmap_legend = F,  ht_gap = unit(7, "mm"), annotation_legend_list = pd, padding = unit(c(3, 1, 1, 1), "cm"))
+
+pdf("oncoplot archetype.pdf", width = 10, height = 11)
+draw(onc, show_heatmap_legend = F,  ht_gap = unit(7, "mm"), annotation_legend_list = pd, padding = unit(c(3, 1, 1, 1), "cm"))
+dev.off()
+#draw(pd, x = unit(7, "cm"), y = unit(20, "cm"),just = c("right"), test = F)
+# dev.off()
+```
+
+```{r}
+head(SO_table)
+unique(SO_table$VARIANT_CLASS)
+```
+

@@ -1,0 +1,998 @@
+---
+title: "normal cel subset"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(harmony)
+library(dplyr)
+```
+
+
+```{r}
+normal_final_srt <- readRDS("~/CASCADEpaper/paper/Fig6/normal_final_srt.Rds")
+
+normal_final_srt$cell_id <- factor(normal_final_srt$cell_id, levels = c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast", "Epithelial cell", "Adipocyte","Chondrocyte", "Smooth muscle", "Fibroblast", "Endothelial cell", "Hepatocyte", "Neuron"))
+DotPlot(normal_final_srt, features = unique(all_marker), group.by = "cell_id")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+DimPlot(normal_final_srt, label = T)
+
+```
+```{r harmony on RNA }
+harmony_rna <- function(endo, res = 0.5){
+
+DefaultAssay(endo) <- "RNA"
+endo <- NormalizeData(endo)
+endo <- ScaleData(endo)
+
+endo <- FindVariableFeatures(endo, selection.method = "vst", nfeatures = 2000)
+endo <- RunPCA(endo, features = VariableFeatures(object = endo))
+endo <- RunHarmony(endo, "patient", assay.use = "RNA")
+endo <- endo %>% 
+  RunUMAP(reduction = "harmony", dims = 1:20) %>% 
+  FindNeighbors(reduction = "harmony", dims = 1:20) %>% 
+  FindClusters(resolution = res) %>% 
+  identity()
+
+p <- DimPlot(endo, label = T) + DimPlot(endo, label = T, group.by = "patient")
+print(p)
+return(endo)
+
+}
+```
+
+### enrichment function
+```{r enrichment function, message=FALSE, warning=FALSE}
+
+library(gridExtra)
+library(DOSE)
+library(msigdbr)
+library(clusterProfiler)
+library(enrichplot)
+library(ggnewscale)
+library(dorothea)
+library(dplyr)
+library(tibble)
+library(data.table)
+Hall <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, gene_symbol)
+KEGG <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "KEGG")%>%
+  dplyr::select(gs_name, gene_symbol)
+Reactome <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "REACTOME")%>%
+  dplyr::select(gs_name, gene_symbol)
+
+C5 <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+  dplyr::select(gs_name, gene_symbol)
+C6 <- msigdbr(species = "Homo sapiens", category = "C6") %>%
+  dplyr::select(gs_name, gene_symbol)
+C7 <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, gene_symbol)
+all <- rbind(Hall, KEGG, Reactome,C5,C6)
+
+C8 <- msigdbr(species = "Homo sapiens", category = "C8") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+
+enrichment_plots <- function(geneList, geneSets, upregulatetitle, downregulatetitle){
+  em2 <- GSEA(geneList, TERM2GENE = geneSets)
+  em2_up <- em2
+  em2_up@result <- em2_up@result[em2_up@result$NES > 0,]
+  if(nrow(em2_up@result)>0){
+    d <- dotplot(em2_up, showCategory=30) + ggtitle(upregulatetitle)
+    print(d)
+  }else { print("No upregulated result")}
+  
+  em2_down <- em2
+  em2_down@result <- em2_down@result[em2_down@result$NES < 0,]
+  if(nrow(em2_down@result)>0){
+    d <- dotplot(em2_down, showCategory=30) + ggtitle(downregulatetitle)
+    print(d)}else{ print("No downregulated result")}
+  return(em2)
+}
+
+generate_genelist <- function(markerdf){
+  temp <- setNames(markerdf$avg_log2FC, rownames(markerdf))
+  temp <- sort(temp, decreasing = T)
+  return(temp)
+}
+```
+
+
+## endothelial cell
+```{r message=FALSE, warning=FALSE}
+endo <- subset(normal_final_srt, cell_id == "Endothelial cell")
+endo <- harmony_rna(endo)
+```
+n = 2053
+```{r}
+FeaturePlot(endo, c("PECAM1","CD34"))
+FeaturePlot(endo, c("ACKR1", "SELE", "SELP", "ICAM1", "VCAM1", "HLA-DRA"))
+FeaturePlot(endo, c("DLL4", "RGS5", "ESM1"))
+FeaturePlot(endo, c("DLL4", "CXCL12", "VEGFC"))
+FeaturePlot(endo, c("VWF", "GJA5", "DSRED", "NRG1", "EMCN"))
+FeaturePlot(endo, c("GJA5", "FBLN5", "LTBP4")) # aterial
+FeaturePlot(endo, c("ACKR1", "SELP")) # venous
+FeaturePlot(endo, c("CA4", "FCN3", "EDN1")) # capilary
+FeaturePlot(endo, c("CXCR4", "ESM1", "ANGPT2")) # tip like
+```
+
+```{r  enrichment , fig.height=12, fig.width=8}
+endo_marker <- FindAllMarkers(endo)
+markerlist <- lapply(split(endo_marker, endo_marker$cluster), generate_genelist)
+endo_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+
+```
+```{r}
+names(endo_en) <- names(markerlist)
+endo_en <- endo_en[sapply(endo_en, nrow)>0]
+endo_en <- rbindlist(lapply(endo_en, function(x) x@result), idcol = "cluster")
+table(endo$site, endo$seurat_clusters)
+DimPlot(endo, group.by = "site")
+```
+
+
+cluster 0: vascular endo
+cluster 1: vascular endo / aterial cells
+cluster 2: mixture of lymphatic /vascular endo
+cluster 3: lymphatic endo 
+cluster 4: Liver sinusoidal endothelial cells (LSECs)
+cluster 5: vein endo
+cluster 6: fibroblast/chondrocyte/SM
+cluster 7: hepatocytes???
+
+
+### clean the endothelial cells
+```{r}
+hepacell <- WhichCells(endo, idents = "7")
+fibrocell <- WhichCells(endo, idents = "6")
+
+endo2 <- subset(endo, idents = 0:5)
+endo2 <- harmony_rna(endo2)
+DimPlot(endo2, label = T) + DimPlot(endo2, label = T, group.by = "patient")
+```
+
+```{r}
+FeaturePlot(endo2, c("PECAM1","CD34"))
+FeaturePlot(endo2, c("ACKR1", "SELE", "SELP", "ICAM1", "VCAM1", "HLA-DRA"))
+FeaturePlot(endo2, c("DLL4", "RGS5", "ESM1"))
+FeaturePlot(endo2, c("DLL4", "CXCL12", "VEGFC"))
+FeaturePlot(endo2, c("VWF", "GJA5", "DSRED", "NRG1", "EMCN"))
+FeaturePlot(endo2, c("GJA5", "FBLN5", "LTBP4")) # aterial
+FeaturePlot(endo2, c("ACKR1", "SELP")) # venous
+FeaturePlot(endo2, c("CA4", "FCN3", "EDN1")) # capilary
+FeaturePlot(endo2, c("CXCR4", "ESM1", "ANGPT2")) # tip like
+```
+```{r fig.height=12, fig.width=8}
+endo2_marker <- FindAllMarkers(endo2)
+markerlist <- lapply(split(endo2_marker, endo2_marker$cluster), generate_genelist)
+endo2_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(endo2_en) <- names(markerlist)
+endo2_en <- endo2_en[sapply(endo2_en, nrow)>0]
+endo2_en <- rbindlist(lapply(endo2_en, function(x) x@result), idcol = "cluster")
+
+```
+```{r}
+table(endo2$site, endo2$seurat_clusters)
+DimPlot(endo2, group.by = "site")
+DimPlot(endo2)
+FeaturePlot(endo2, Fibroblast_feature)
+FeaturePlot(endo2, smooth_muscle)
+FeaturePlot(endo2,Epithelial_cell)
+FeaturePlot(endo2, focused_B_cell_feature)
+```
+c0 : endothelial tip cells
+c1, c2 : vascular endothelial cell 
+
+c4: lymphatic endo 
+c3. c5: LSECS 
+c6: vein
+c7: artery
+
+c8: Epithelial cell?
+
+
+
+```{r}
+fibrocell <- c(fibrocell, WhichCells(endo2, idents = 9))
+immunecell <- WhichCells(endo2, idents = 10)
+endo3 <- subset(endo2, idents = 0:7)
+endo3 <- harmony_rna(endo3)
+```
+```{r fig.height=10, fig.width=6}
+endo3_marker <- FindAllMarkers(endo3)
+markerlist <- lapply(split(endo3_marker, endo3_marker$cluster), generate_genelist)
+endo3_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(endo3_en) <- names(markerlist)
+endo3_en <- endo3_en[sapply(endo3_en, nrow)>0]
+endo3_en <- rbindlist(lapply(endo3_en, function(x) x@result), idcol = "cluster")
+table(endo3$site, endo3$seurat_clusters)
+```
+```{r}
+FeaturePlot(endo3, Fibroblast_feature)
+FeaturePlot(endo3, focused_B_cell_feature)
+FeaturePlot(endo3, c("PECAM1","CD34"))
+FeaturePlot(endo3, c("ACKR1", "SELE", "SELP", "ICAM1", "VCAM1", "HLA-DRA"))
+FeaturePlot(endo3, c("DLL4", "RGS5", "ESM1"))
+FeaturePlot(endo3, c("DLL4", "CXCL12", "VEGFC"))
+FeaturePlot(endo3, c("VWF", "GJA5", "DSRED", "NRG1", "EMCN"))
+FeaturePlot(endo3, c("GJA5", "FBLN5", "LTBP4")) # aterial
+FeaturePlot(endo3, c("ACKR1", "SELP")) # venous
+FeaturePlot(endo3, c("CA4", "FCN3", "EDN1")) # capilary
+FeaturePlot(endo3, c("CXCR4", "ESM1", "ANGPT2")) # tip like
+```
+
+### final annotation
+```{r fig.height=5, fig.width=5}
+endo3$cell_anno <- NA
+endo3$cell_anno[endo3$seurat_clusters == "0"] <- "Endothelial tip cell"
+endo3$cell_anno[endo3$seurat_clusters %in% c("1", "2", "3")] <- "Endothelial cell"
+endo3$cell_anno[endo3$seurat_clusters== "6"] <- "Vein endothelial cell"
+endo3$cell_anno[endo3$seurat_clusters== "7"] <- "Arterial endothelial cell"
+endo3$cell_anno[endo3$seurat_clusters== "4"] <- "Lymphatic endothelial cell"
+endo3$cell_anno[endo3$seurat_clusters== "5"] <- "Liver sinusoidal endothelial cell"
+Idents(endo3) <- endo3$cell_anno
+saveRDS(endo3, "Endothelial.Rds")
+DimPlot(endo3) + ggtitle("Endoethelial cell") +NoLegend()
+DimPlot(endo3, group.by = "site")
+```
+```{r}
+library(scales)
+library(ggplot2)
+library(pals)
+barplot_bytissue <- function(endo3){
+df <- endo3@meta.data %>% group_by(site, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$cell_anno <- factor(df$cell_anno, levels = unique(endo3$cell_anno))
+ggplot(df, aes(x = site, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values =hue_pal()(nlevels(df$cell_anno)))
+}
+
+barplot_bypatient <- function(endo3){
+df <- endo3@meta.data %>% group_by(cell_anno, patient) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$cell_anno <- factor(df$cell_anno, levels = unique(endo3$cell_anno))
+ggplot(df, aes(x = cell_anno, y = freq, fill = patient)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values =brewer.set2(9))
+}
+
+barplot_bytissue(endo3)
+barplot_bypatient(endo3)
+```
+
+
+## fibroblast , chondrocyte, smooth muscle, adipocyte
+```{r message=FALSE, warning=FALSE}
+fibro <- subset(normal_final_srt, cell_id %in% c("Fibroblast","Chondrocyte", "Smooth muscle", "Adipocyte"))
+fibro <- harmony_rna(fibro, res = 1)
+```
+
+```{r}
+DimPlot(fibro, group.by = "cell_id")
+FeaturePlot(fibro, Fibroblast_feature)
+FeaturePlot(fibro, smooth_muscle)
+FeaturePlot(fibro, Chondrocyte_feature)
+FeaturePlot(fibro, Adipocyte_feature)
+
+FeaturePlot(fibro, c("POSTIN", "CXCL14", "COL3A1"))+ plot_annotation(title = "Active")
+FeaturePlot(fibro, c("S100A4", "CFD", "DPT"))+ plot_annotation(title = "Resting")
+FeaturePlot(fibro, "CTHRC1") + plot_annotation(title = "CAFs")
+FeaturePlot(fibro, c("FAP", "COL1A1", "POSTN" )) + plot_annotation(title = "inflam") # also CAFs
+
+```
+c0 CAF
+c1, c5 = senescent fibro
+
+
+```{r fig.height=12, fig.width=8}
+fibro_marker <- FindAllMarkers(fibro)
+markerlist <- lapply(split(fibro_marker, fibro_marker$cluster), generate_genelist)
+fibro_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(fibro_en) <- names(markerlist)
+fibro_en <- fibro_en[sapply(fibro_en, nrow)>0]
+fibro_en <- rbindlist(lapply(fibro_en, function(x) x@result), idcol = "cluster")
+
+```
+```{r}
+fibro_marker %>% group_by(cluster) %>% filter(avg_log2FC > 1.5 ) %>% View(.)
+fibro_marker %>% group_by(cluster) %>% filter(avg_log2FC > 1.5 ) %>% pull(gene) %>% unique(.) -> DEgenes
+DoHeatmap(fibro, DEgenes)
+```
+
+```{r}
+FeaturePlot(fibro, c("ACTA2", "MYH11", "KCNJ8", "CNN1"), ncol = 3)  # smooth muscle
+FeaturePlot(fibro, c("IBSP", "SP7"))
+FeaturePlot(fibro, c("IGF1", "C3", "ABCA9")) # skeletal muscle
+```
+
+```{r}
+immunecell <- c(immunecell, WhichCells(fibro, idents = "11"))
+neurocell <- WhichCells(fibro, idents = "12")
+fibro2 <- subset(fibro, idents =  c(0:10, 13))
+fibro2 <- harmony_rna(fibro2)
+```
+
+```{r}
+FeaturePlot(fibro2, c("ACTA2", "MYH11", "KCNJ8", "CNN1"), ncol = 3)  # smooth muscle
+FeaturePlot(fibro2, c("IBSP", "SP7")) #chondrocyte
+FeaturePlot(fibro2, c("IGF1", "C3", "ABCA9")) # skeletal muscle
+FeaturePlot(fibro2, c("S100A4", "CFD", "DPT"))+ plot_annotation(title = "Resting")
+FeaturePlot(fibro2, c("FAP", "COL1A1", "POSTN","CTHRC1")) + plot_annotation(title = "inflam") # also CAFs
+FeaturePlot(fibro2, Adipocyte_feature)
+FeaturePlot(fibro2, Fibroblast_feature)
+FeaturePlot(fibro2, Neuron_feature)
+```
+
+```{r fig.height=12, fig.width=8}
+fibro2_marker <- FindAllMarkers(fibro2)
+markerlist <- lapply(split(fibro2_marker, fibro2_marker$cluster), generate_genelist)
+fibro2_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(fibro2_en) <- names(markerlist)
+fibro2_en <- fibro2_en[sapply(fibro2_en, nrow)>0]
+fibro2_en <- rbindlist(lapply(fibro2_en, function(x) x@result), idcol = "cluster")
+
+```
+
+```{r fig.height=5, fig.width=5}
+#fibro2_marker %>% filter(cluster == "7") %>% View()
+fibro2$cell_anno <- "Fibroblast"
+fibro2$cell_anno[fibro2$seurat_clusters == "1"] <- "Senescent fibroblast"
+fibro2$cell_anno[fibro2$seurat_clusters %in% c("0")] <- "CAFs"
+fibro2$cell_anno[fibro2$seurat_clusters== "9"] <- "Skeletal muscle"
+fibro2$cell_anno[fibro2$seurat_clusters== "4"] <- "Chondrocyte"
+fibro2$cell_anno[fibro2$seurat_clusters== "6"] <- "Smooth muscle"
+fibro2$cell_anno[fibro2$seurat_clusters== "3"] <- "Adipocyte"
+Idents(fibro2) <- fibro2$cell_anno
+saveRDS(fibro2, "Fibroblast.Rds")
+DimPlot(fibro2) + ggtitle("Connective tissue") + NoLegend()
+DimPlot(fibro2, group.by = "site")
+```
+```{r}
+df <- fibro2@meta.data %>% group_by(site, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+ggplot(df, aes(x = site, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.dark2(7))
+
+df <- fibro2@meta.data %>% group_by(sample, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$patient <- substr(df$sample, 1, 6 )
+ggplot(df, aes(x = sample, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+  facet_grid(.~patient, scales = "free", space = "free" ) +
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.dark2(7))
+
+barplot_bytissue(fibro2)
+barplot_bypatient(fibro2)
+```
+```{r}
+fibro3 <- merge(fibro2, subset(normal_final_srt, cells = fibrocell))
+fibro3 <- harmony_rna(fibro3)
+```
+```{r}
+DimPlot(fibro3, group.by = "cell_anno")
+DimPlot(fibro3, group.by = "site")
+FeaturePlot(fibro3, Fibroblast_feature)
+FeaturePlot(fibro3, Endothelial_feature)
+```
+## T cell 
+```{r}
+Tcell <- subset(normal_final_srt, cell_id == "T cell")
+Tcell <- harmony_rna(Tcell)
+```
+```{r fig.height=8, fig.width=10}
+FeaturePlot(Tcell, T_cell_feature)
+FeaturePlot(Tcell, Treg_feature)
+FeaturePlot(Tcell, Th17_feature)
+FeaturePlot(Tcell, Th1_feature)
+FeaturePlot(Tcell, Naive_Th_feature)
+FeaturePlot(Tcell, CTL_feature)
+FeaturePlot(Tcell, CD8_effector_feature)
+FeaturePlot(Tcell, CD4_T_cell_feature)
+FeaturePlot(Tcell, NK_feature)
+FeaturePlot(Tcell, Endothelial_feature)
+FeaturePlot(Tcell, plasma_feature)
+FeaturePlot(Tcell, Hepatocytes_feature)
+FeaturePlot(Tcell, c("CCR7", "CD62L"))  #memory t cell
+```
+```{r fig.height=8, fig.width=5}
+Tcell_marker <- FindAllMarkers(Tcell)
+markerlist <- lapply(split(Tcell_marker, Tcell_marker$cluster), generate_genelist)
+Tcell_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(Tcell_en) <- names(markerlist)
+Tcell_en <- Tcell_en[sapply(Tcell_en, nrow)>0]
+Tcell_en <- rbindlist(lapply(Tcell_en, function(x) x@result), idcol = "cluster")
+
+```
+```{r fig.height=8, fig.width=5}
+Tcell$cell_anno <- "Naive T cell"
+Tcell$cell_anno[Tcell$seurat_clusters == "4"] <- "Treg"
+Tcell$cell_anno[Tcell$seurat_clusters == "1"] <- "CD8+ T cell"
+Tcell$cell_anno[Tcell$seurat_clusters == "3"] <- "NK cell"
+Idents(Tcell)<- Tcell$cell_anno
+
+Tcell_marker <- FindAllMarkers(Tcell)
+markerlist <- lapply(split(Tcell_marker, Tcell_marker$cluster), generate_genelist)
+Tcell_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(Tcell_en) <- names(markerlist)
+Tcell_en <- Tcell_en[sapply(Tcell_en, nrow)>0]
+Tcell_en <- rbindlist(lapply(Tcell_en, function(x) x@result), idcol = "cluster")
+
+
+```
+
+```{r fig.height=5, fig.width=5}
+DimPlot(Tcell)+ ggtitle("T cell") + NoLegend()
+saveRDS(Tcell, "Tcell.Rds")
+```
+```{r}
+df <- Tcell@meta.data %>% group_by(site, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+ggplot(df, aes(x = site, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.dark2(7))
+
+df <- Tcell@meta.data %>% group_by(sample, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$patient <- substr(df$sample, 1, 6 )
+ggplot(df, aes(x = sample, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+  facet_grid(.~patient, scales = "free", space = "free" ) +
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90)) + 
+  scale_fill_manual(values = brewer.dark2(7))
+barplot_bytissue(Tcell)
+barplot_bypatient(Tcell)
+```
+
+##B cell
+```{r}
+Bcell <- subset(normal_final_srt, ident = c("B cell", "Naive cell", "Plasma cell"))
+Bcell <- harmony_rna(Bcell)
+```
+```{r}
+FeaturePlot(Bcell, plasma_feature)
+FeaturePlot(Bcell, T_cell_feature)
+FeaturePlot(Bcell, focused_B_cell_feature)
+FeaturePlot(Bcell, focused_naive_memory_B_feature)
+FeaturePlot(Bcell, focused_activated_B_feature)
+FeaturePlot(Bcell, Naive_Th_feature)
+FeaturePlot(Bcell, NK_feature)
+FeaturePlot(Bcell, c("BACH2", "EBF1", "PAX5"))
+FeaturePlot(Bcell, Fibroblast_feature)
+FeaturePlot(Bcell, Endothelial_feature)
+FeaturePlot(Bcell, Mast_feature)
+FeaturePlot(Bcell, mDC_feature)
+FeaturePlot(Bcell, pDC_feature)
+FeaturePlot(Bcell, Epithelial_cell)
+FeaturePlot(Bcell, c("CD11B","CD14","CD33"))
+```
+```{r fig.height=8, fig.width=5}
+Bcell_marker <- FindAllMarkers(Bcell)
+markerlist <- lapply(split(Bcell_marker, Bcell_marker$cluster), generate_genelist)
+Bcell_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(Bcell_en) <- names(markerlist)
+Bcell_en <- Bcell_en[sapply(Bcell_en, nrow)>0]
+Bcell_en <- rbindlist(lapply(Bcell_en, function(x) x@result), idcol = "cluster")
+
+```
+
+```{r}
+Bcell2 <- subset(Bcell, ident = 0:7)
+Bcell2 <- harmony_rna(Bcell2)
+```
+```{r}
+FeaturePlot(Bcell2, plasma_feature)
+FeaturePlot(Bcell2, T_cell_feature)
+FeaturePlot(Bcell2, focused_B_cell_feature)
+FeaturePlot(Bcell2, focused_naive_memory_B_feature)
+FeaturePlot(Bcell2, focused_activated_B_feature)
+FeaturePlot(Bcell2, Naive_Th_feature)
+FeaturePlot(Bcell2, NK_feature)
+FeaturePlot(Bcell2, c("BACH2", "EBF1", "PAX5"))
+FeaturePlot(Bcell2, Fibroblast_feature)
+FeaturePlot(Bcell2, Endothelial_feature)
+FeaturePlot(Bcell2, Mast_feature)
+FeaturePlot(Bcell2, mDC_feature)
+FeaturePlot(Bcell2, pDC_feature)
+FeaturePlot(Bcell2, Epithelial_cell)
+FeaturePlot(Bcell2, c("CD11B","CD14","CD33"))
+
+```
+```{r fig.height=5, fig.width=5}
+Bcell2$cell_anno <- "B cell"
+Bcell2$cell_anno[Bcell2$seurat_clusters == "2"] <- "Plasma cell"
+Bcell2$cell_anno[Bcell2$seurat_clusters == "4"] <- "Progenitor B cell"
+Idents(Bcell2) <- Bcell2$cell_anno
+saveRDS(Bcell2, "Bcell.Rds")
+DimPlot(Bcell2) + ggtitle("B cell") + NoLegend()
+
+```
+```{r}
+barplot_bytissue(Bcell2)
+barplot_bypatient(Bcell2)
+```
+
+##Macrophage
+```{r}
+macro <- subset(normal_final_srt, ident = "Macrophage")
+macro <- harmony_rna(macro)
+```
+```{r fig.height=10, fig.width=10}
+FeaturePlot(macro, Macrophage_feature)
+FeaturePlot(macro, M1_feature)
+FeaturePlot(macro, M2_feature)
+FeaturePlot(macro, phagocytosis_feature)
+FeaturePlot(macro, angiogenesis_feature)
+FeaturePlot(macro, TAM_feature)
+FeaturePlot(macro, c("SPP1", "RNASE1", "MT1G", "SEPP1", "FOLR2", "NUPR1", "KLHDC8B", "CCL18", "MMP12","APOC2" ))
+FeaturePlot(macro, Mast_feature)
+FeaturePlot(macro, mDC_feature)
+FeaturePlot(macro, Monocyte_feature)
+FeaturePlot(macro, c("FCN1", "LYZ", "VCAN","CD68", "GPNMB", "CTSB")) # monocytes
+FeaturePlot(macro, c("MARCO", "FABP4", "GPNMB", "CTSB"))
+
+```
+
+```{r fig.height=7, fig.width=5}
+macro_marker <- FindAllMarkers(macro)
+markerlist <- lapply(split(macro_marker, macro_marker$cluster), generate_genelist)
+macro_en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(macro_en) <- names(markerlist)
+macro_en <- macro_en[sapply(macro_en, nrow)>0]
+macro_en <- rbindlist(lapply(macro_en, function(x) x@result), idcol = "cluster")
+```
+
+```{r fig.height=6, fig.width=6}
+DimPlot(macro, label = T)
+macro$cell_anno <- "Macrophagen M0" # SAT1+
+macro$cell_anno[macro$seurat_clusters == "11"] <- "Mast cell"
+macro$cell_anno[macro$seurat_clusters == "9"] <- "Monocyte"
+macro$cell_anno[macro$seurat_clusters %in% c("2", "10", "4")] <- "TAM"
+erthcell <- WhichCells(macro, idents = "6")
+
+FeaturePlot(macro, macro_marker %>% arrange(desc(avg_log2FC)) %>% filter(cluster == "12") %>% slice(1:6) %>% pull(gene))
+table(macro$site, macro$seurat_clusters)
+FeaturePlot(Bcell, c("MS4A1", "LTB", "CD37", "CD79B"))
+
+```
+
+```{r}
+macro2 <- subset(macro, ident = c(0:5, 7:12))
+macro2 <- harmony_rna(macro2)
+```
+```{r}
+DimPlot(macro2, group.by = "cell_anno")
+FeaturePlot(macro2, Macrophage_feature)
+FeaturePlot(macro2, TAM_feature)
+FeaturePlot(macro2, c("SPP1", "RNASE1", "MT1G", "SEPP1", "FOLR2", "NUPR1", "KLHDC8B", "CCL18", "MMP12","APOC2" ))
+FeaturePlot(macro2, Mast_feature)
+FeaturePlot(macro2, Monocyte_feature)
+FeaturePlot(macro2, c("FCN1", "LYZ", "VCAN","CD68", "GPNMB", "CTSB")) # monocytes
+FeaturePlot(macro2, c("MARCO", "FABP4", "GPNMB", "CTSB"))
+```
+```{r fig.height=6, fig.width=6}
+macro2_marker <- FindAllMarkers(macro2)
+FeaturePlot(macro2, macro2_marker %>% arrange(desc(avg_log2FC)) %>% filter(cluster == "8") %>% slice(1:6) %>% pull(gene))
+FeaturePlot(macro2, macro2_marker %>% arrange(desc(avg_log2FC)) %>% filter(cluster == "11") %>% slice(1:6) %>% pull(gene))
+FeaturePlot(macro2, macro2_marker %>% arrange(desc(avg_log2FC)) %>% filter(cluster == "6") %>% slice(1:6) %>% pull(gene))
+FeaturePlot(macro2, macro2_marker %>% arrange(desc(avg_log2FC)) %>% filter(cluster == "5") %>% slice(1:6) %>% pull(gene))
+```
+
+```{r final anno, fig.height=5, fig.width=5}
+macro2$cell_anno <- "macro2phagen M0" # SAT1+
+macro2$cell_anno[macro2$seurat_clusters == "9"] <- "Mast cell"
+macro2$cell_anno[macro2$seurat_clusters == "6"] <- "Monocyte"
+macro2$cell_anno[macro2$seurat_clusters %in% c("2")] <- "TAM"
+Idents(macro2) <- macro2$cell_anno
+DimPlot(macro2) + ggtitle("Macrophge") + NoLegend()
+
+```
+```{r}
+barplot_bytissue(macro2)
+barplot_bypatient(macro2)
+```
+
+## Epithelial cell
+```{r}
+epi <- subset(normal_final_srt, ident = "Epithelial cell")
+epi <- harmony_rna(epi)
+```
+```{r fig.height=15, fig.width=15}
+load("/trigos_team/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
+epi_sig <- all_gene_sets[c(1:4, 10)]
+epi_sig <- lapply(epi_sig, function(x) Reduce(intersect, x))
+lapply(epi_sig, function(x) FeaturePlot(epi, x))
+lapply(epi_sig, function(x) VlnPlot(epi, x))
+```
+
+```{r}
+FeaturePlot(epi, features = Epithelial_cell)
+FeaturePlot(epi, features = c("KRT17", "KRT15", "CCL9", "CDH1"))
+```
+
+```{r fig.height=15, fig.width=15}
+FeaturePlot(epi, Endothelial_feature)
+FeaturePlot(epi, smooth_muscle)
+FeaturePlot(epi, Fibroblast_feature)
+FeaturePlot(epi, Hepatocytes_feature)
+FeaturePlot(epi, Macrophage_feature)
+```
+
+```{r fig.height=8, fig.width=4}
+epi.marker <- FindAllMarkers(epi)
+markerlist <- lapply(split(epi.marker, epi.marker$cluster), generate_genelist)
+epi.en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(epi.en) <- names(markerlist)
+epi.en <- epi.en[sapply(epi.en, nrow)>0]
+epi.en <- rbindlist(lapply(epi.en, function(x) x@result), idcol = "cluster")
+DimPlot(epi, group.by = "site")+ DimPlot(epi, label = T)
+```
+```{r}
+immunecell <- c(immunecell, WhichCells(epi, idents = "6"))
+fibrocell <- c(fibrocell, WhichCells(epi, idents = "3")) # stromal cells in brain
+hepacell <- c(hepacell, WhichCells(epi, idents = "4"))
+epi2 <- subset(epi, cells = WhichCells(epi, idents = c("3", "4", "6"), invert = T))
+epi2 <- harmony_rna(epi2)
+```
+```{r fig.height=8, fig.width=4}
+epi2.marker <- FindAllMarkers(epi2)
+markerlist <- lapply(split(epi2.marker, epi2.marker$cluster), generate_genelist)
+epi2.en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(epi2.en) <- names(markerlist)
+epi2.en <- epi2.en[sapply(epi2.en, nrow)>0]
+epi2.en <- rbindlist(lapply(epi2.en, function(x) x@result), idcol = "cluster")
+```
+```{r fig.height=15, fig.width=15}
+lapply(epi_sig, function(x) FeaturePlot(epi2, x))
+```
+```{r}
+FeaturePlot(epi2, c("CLDN7", "SPARC", "KRT17", "CITED1", "SPP1"))
+DimPlot(epi2, cells.highlight = WhichCells(epi, idents = "0")) # lumnial
+DimPlot(epi2, cells.highlight = WhichCells(epi, idents = "1"))# basal
+DimPlot(epi2, cells.highlight = WhichCells(epi, idents = "2"))# ciliated 
+DimPlot(epi2, cells.highlight = WhichCells(epi, idents = "5"))# arveolar
+DimPlot(epi2, label = T)
+
+```
+```{r final anno, fig.height=5, fig.width=5}
+epi2$cell_anno <- "Epithelial cell"
+epi2$cell_anno[epi2$seurat_clusters == "2"] <- "Ciliated epithelial cell"
+epi2$cell_anno[epi2$seurat_clusters %in% c("0", "4")] <- "Luminal cell"
+epi2$cell_anno[epi2$seurat_clusters %in% c("1", "5", "6")] <- "Basal cell"
+epi2$cell_anno[epi2$seurat_clusters %in% c("3", "7")] <- "Alveolar epithelial cell"
+
+Idents(epi2) <- epi2$cell_anno
+DimPlot(epi2) + ggtitle("Epithelial cell") + NoLegend()
+# saveRDS(epi2, "~/CASCADEpaper/paper/Fig6/subset_normal_cell/Epithelial.Rds")
+```
+```{r}
+barplot_bytissue(epi2)
+barplot_bypatient(epi2)
+```
+##hepatocytes
+```{r}
+hepa <- subset(normal_final_srt, idents = "Hepatocyte")
+hepa <- harmony_rna(hepa)
+```
+```{r}
+FeaturePlot(hepa, Hepatocytes_feature)
+```
+
+
+```{r}
+hepa2 <- merge(hepa, subset(normal_final_srt, cells = names(which(normal_final_srt$site[hepacell] == "liver"))))
+hepa2 <- harmony_rna(hepa2)
+```
+```{r}
+FeaturePlot(hepa2, Hepatocytes_feature)
+FeaturePlot(hepa2, c("TF", "CYP3A4", "CYP2E1", "ASS1", "APOE"))
+Hepatocytes_feature <- c(Hepatocytes_feature, "TF", "CYP3A4", "CYP2E1", "ASS1", "APOE")
+hepa$cell_anno <- hepa$cell_id
+saveRDS(hepa, "~/CASCADEpaper/paper/Fig6/subset_normal_cell/Hepatocytes.Rds")
+```
+
+the suspicious hepatocytes are not hepatocytes or epithelial cells in liver : chonlangiocyte
+
+## Erythroblast
+
+```{r}
+eryth <- subset(normal_final_srt, ident = "Erythroblast")
+eryth <- harmony_rna(eryth)
+```
+```{r}
+FeaturePlot(eryth, Erythroid_marker)
+```
+```{r}
+eryth$cell_anno <- eryth$cell_id
+saveRDS(eryth, "~/CASCADEpaper/paper/Fig6/subset_normal_cell/Erythroid.Rds")
+```
+
+
+```{r fig.height=8, fig.width=4}
+eryth.marker <- FindAllMarkers(eryth)
+markerlist <- lapply(split(eryth.marker, eryth.marker$cluster), generate_genelist)
+eryth.en <- lapply(names(markerlist), function(cluster) {
+  x <-markerlist[[cluster]]
+  enrichment_plots(x, C8, paste(cluster, "UP"), paste(cluster, "DOWN"))
+  })
+names(eryth.en) <- names(markerlist)
+eryth.en <- eryth.en[sapply(eryth.en, nrow)>0]
+eryth.en <- rbindlist(lapply(eryth.en, function(x) x@result), idcol = "cluster")
+```
+##Neuron
+```{r}
+# neu <- merge(subset(normal_final_srt, ident = "Neuron"), subset(normal_final_srt, cells = neurocell))
+# neu <- harmony_rna(neu)
+
+
+```
+```{r}
+FeaturePlot(neu, Neuron_feature)
+DimPlot(neu, group.by = "site")
+DotPlot(neu, features = unique(Neuron_feature), group.by = "site")
+DotPlot(neu, features = unique(Neuron_feature))
+```
+```{r}
+neu <- subset(normal_final_srt, ident = "Neuron")
+neu$cell_anno <- neu$cell_id
+
+saveRDS(neu, "~/CASCADEpaper/paper/Fig6/subset_normal_cell/Neuron.Rds")
+```
+
+
+#combine all the clean subset normal cells to form final normal cells version 2
+```{r}
+library(scCustomize)
+normals <- list.files("~/CASCADEpaper/paper/Fig6/subset_normal_cell", pattern = ".Rds",full.names = T) %>% lapply(., readRDS)
+normal2 <- Merge_Seurat_List(normals, merge.data = F)
+normal2 <- harmony_rna(normal2)
+normal2 <- FindClusters(normal2, resolution = 1)
+```
+```{r fig.height=10, fig.width=10}
+library(pals)
+DimPlot(normal2, label = T)
+DimPlot(normal2, group.by = "cell_id", label = T)
+DimPlot(normal2, group.by = "cell_anno", label = T)
+DimPlot(normal2, group.by = "cell_anno", label = T, repel = T, cols = as.character(polychrome(36)))+NoLegend()
+```
+```{r}
+# DimPlot(normal2, cells.highlight = colnames(epi2))
+# DimPlot(epi2)
+# DimPlot(endo3)
+# DimPlot(fibro3)
+Epithelial_cell <- c("WFDC2","EPCAM", "SLPI", "EHF", "TMC5")#"CXADR", developing neuron system
+
+Hepatocytes_feature <- c("APOC3", "APOA2", "ALB", "SAA1", "ORM1", "HP")
+Hepatocytes_feature <- c(Hepatocytes_feature, "TF", "CYP3A4", "CYP2E1")#, "ASS1", "APOE")
+
+Neuron_feature <- c( "GPC5", "NRXN1", "PCDH9", #astrocyte #G6PAM endothelial marker
+                    "RBFOX1", "CADM2", "CSMD1", "KCNIP4")#, #exitatory neu
+                    #"NRXN3", "CNTNAP2", "ROBO2") # inhibitory neu
+
+Fibroblast_feature <- c("DCN","LUM", "CFD", "VCAN", "ALDH1A1", "PDGFRA", "COL3A1","COL1A1", "KAZN") # VCAN
+smooth_muscle <- c("TAGLN", "MYH11","ACTA2","CNN1", "DES", "PRUNE2")
+Adipocyte_feature <- c("ABCC9", "RGS5", "GJC1", "ADCY3","COX4I2", "LPL")# ADCY3, neuronal primary cilia and obesity
+Chondrocyte_feature <- c("IBSP", "SP7", "IFITM5", "SATB2", "INSC")
+
+
+Endothelial_feature <- c("RAMP2","VWF", "ST6GALNAC3", "NOTCH1", "FLT1")
+
+
+Erythroid_marker <- c("HBA2", "HBA1","HBB", "ANK1")
+Macrophage_feature <- c("C1QA","C1QC","LYZ", "CD86", "CD68","CD74", "CD14", "FCGR3A","FCGR2B")
+focused_B_cell_feature <- c("MS4A1","BANK1", "TNFRSF13C")
+plasma_feature <- c("CD38","MZB1","XBP1","IGKC","PIM2",   "IGHA1")
+T_cell_feature <- c("CD3G", 'CD4', "CD8A", "CCL5", "SMAD3",# "FYN",
+                    "CD247", "IL7R") # naive T cell
+
+
+all_marker <- list(Hepatocytes_feature, Neuron_feature,Epithelial_cell, Fibroblast_feature,smooth_muscle, Adipocyte_feature,Chondrocyte_feature,  Endothelial_feature, 
+                   Macrophage_feature, plasma_feature, focused_B_cell_feature, 
+                   T_cell_feature, Erythroid_marker)
+names(all_marker) <- c("Hepatocyte", "Neuron", "Epithelial", "Fibroblast","Myofibroblast", "Lipofibroblast","Chondrocyte",   "Endothelial", "Macrophage", "Plasma cell","B cell", "T cell", "Erythroblst")
+
+```
+ADCY3, neuronal primary cilia and obesity
+CXADR", developing neuron system
+
+PCDH9 fibroblast and neuron 
+VCAN, circulating monocytes also
+CD74 macrophage receptor but can present in b cell, monocytes
+IGKC expression in entire B cell family while high expression of it in plasma cells predict better response to immune checkpoint blackage
+SMAD3 regulate CD8 T cells
+
+```{r fig.height=6, fig.width=20}
+
+normal2$cell_id <- factor(normal2$cell_id, levels = c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast", "Epithelial cell", "Adipocyte","Chondrocyte", "Smooth muscle", "Fibroblast", "Endothelial cell", "Hepatocyte", "Neuron"))
+normal2$cell_anno <- factor(normal2$cell_anno, levels = unique(normal2$cell_anno[order(normal2$cell_id)]))
+
+DotPlot(normal2, features = all_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(normal2, features = all_marker, group.by = "cell_id")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(normal2, features = all_marker, group.by = "cell_anno")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+```{r fig.height=6, fig.width=20}
+normal2$cell_id_general <- "Fibroblast"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(3, 17, 18))] <- "Endothelial"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(0, 4, 9, 14,19))] <- "B/T cells"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(2, 6, 10))] <- "Macrophage"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(13))] <- "Enthroblast"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(12))] <- "Hepatocyte"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(7))] <- "Epithelial"
+normal2$cell_id_general[normal2$seurat_clusters %in% as.character(c(20))] <- "Neuron"
+DotPlot(normal2, features = all_marker, group.by = "cell_id_general")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+```
+
+
+change smooth muscle to myofibroblast, change adipocytes to lipofibroblast
+fibroblast sc paper: https://pubmed.ncbi.nlm.nih.gov/29590628/
+```{r}
+normal2_marker <- FindAllMarkers(normal2, only.pos =  T, logfc.threshold = 1.25)
+normal2_marker %>% arrange(desc(avg_log2FC)) %>% group_by(cluster) %>% slice(1:10)
+
+markers <- split(normal2_marker, normal2_marker$cluster)
+```
+
+```{r}
+FeaturePlot(normal2, features = normal2_marker %>% arrange(desc(avg_log2FC)) %>% group_by(cluster) %>% slice(1:15) %>% filter(cluster == "16") %>% pull(gene) )
+FeaturePlot(normal2, c("MS4A1", "CD3G", "CD3E", "CD3D"))
+
+```
+
+```{r}
+rm_cells <- CellSelector(d)
+```
+
+```{r}
+normal2 <- subset(normal2, cells = WhichCells(normal2, rm_cells, invert = T))
+normal2 <- harmony_rna(normal2, res = 1)
+```
+```{r fig.height=10, fig.width=10}
+library(pals)
+DimPlot(normal2, label = T)
+DimPlot(normal2, group.by = "cell_id", label = T)
+DimPlot(normal2, group.by = "cell_anno", label = T)
+DimPlot(normal2, group.by = "cell_anno", label = T, cols = as.character(polychrome(36)))+NoLegend()
+```
+
+```{r fig.height=6, fig.width=20}
+
+normal2$cell_id <- factor(normal2$cell_id, levels = c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast", "Epithelial cell", "Adipocyte","Chondrocyte", "Smooth muscle", "Fibroblast", "Endothelial cell", "Hepatocyte", "Neuron"))
+normal2$cell_anno <- factor(normal2$cell_anno, levels = unique(normal2$cell_anno[order(normal2$cell_id)]))
+
+DotPlot(normal2, features = all_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(normal2, features = all_marker, group.by = "cell_id")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(normal2, features = all_marker, group.by = "cell_anno")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+```{r}
+test_marker <- FindMarkers(normal2, ident.1 = "15", ident.2 = c("9", "0", "3"), logfc.threshold = 1) 
+FeaturePlot(normal2, features = test_marker %>% filter(pct.1 > 0.1 & avg_log2FC >1) %>% arrange(desc(avg_log2FC)) %>% slice(1:10) %>% rownames(.))
+
+test_marker <- FindMarkers(normal2, ident.1 = "0", ident.2 = c("9", "15", "3"), logfc.threshold = 1) 
+FeaturePlot(normal2, features = test_marker %>% filter(pct.1 > 0.1 & avg_log2FC >1) %>% arrange(desc(avg_log2FC)) %>% slice(1:10) %>% rownames(.))
+
+```
+cluster 15  maybe activating, differenting T cells SATB1
+
+```{r fig.height=6, fig.width=7}
+normal2$cell_id2 <- normal2$cell_id
+ids <- apply(as.data.frame.matrix(table(normal2$cell_id, normal2$seurat_clusters)), 2, function(x) names(which.max(x)))
+normal2$cell_id2 <- as.character(ids[normal2$seurat_clusters])
+DimPlot(normal2, group.by = "cell_id2", label = T)
+normal2$cell_id2[normal2$seurat_clusters == "12"] <- "Myofibroblast"
+normal2$cell_id2[normal2$seurat_clusters == "16"] <- "Fibroblast"
+normal2$cell_id2[normal2$seurat_clusters == "8"] <- "Lipofibroblast"
+DimPlot(normal2, group.by = "cell_id2", label = T, repel = T) + ggtitle("normal cell types")
+```
+
+```{r fig.height=6, fig.width=22}
+
+normal2$cell_id <- factor(normal2$cell_id2, levels = c("T cell","B cell","Plasma cell",  "Naive cell", "Macrophage", "Erythroblast", "Epithelial cell", "Fibroblast","Lipofibroblast","Myofibroblast","Chondrocyte",   "Endothelial cell", "Hepatocyte", "Neuron"))
+
+DotPlot(normal2, features = all_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(normal2, features = all_marker, group.by = "cell_id2")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+```{r fig.height=14, fig.width=7}
+library(dittoSeq)
+dittoHeatmap(normal2, genes = unlist(all_marker), annot.by = "cell_id2", slot = "scale.data")
+```
+
+```{r}
+library(readxl)
+library(ggplot2)
+microscopy <- read_excel("microscopy estimation.xlsx")
+phenotype_meta <- readRDS("~/integration/tumor_only_phenotype_meta.Rds")
+b.cells <- normal2@meta.data[normal2$cell_id2 == "B cell",]
+t.cells <- normal2@meta.data[normal2$cell_id2 == "T cell",]
+tb.t <- as.data.frame(table(t.cells$sample)) %>% `colnames<-`(c("sample", "Tcell_n"))
+tb.b <- as.data.frame(table(b.cells$sample)) %>% `colnames<-`(c("sample", "Bcell_n"))
+tb2 <- as.data.frame(table(phenotype_meta$sample))%>% `colnames<-`(c("sample", "tumor_n"))
+df <- merge(tb2, tb.t, by = "sample", all = T)
+df <- merge(df, tb.b, by = "sample", all = T)
+normal.tb <- as.data.frame(table(normal2$sample))%>% `colnames<-`(c("sample", "normal_n"))
+df <- merge(df, normal.tb, by = "sample", all = T )
+
+df <- apply(df, 2, function(x) x[is.na(x)] <- 0)
+df$Tcell_n[is.na(df$Tcell_n)] <- 0
+df$Bcell_n[is.na(df$Bcell_n)] <- 0
+df <- df %>% mutate(sum = normal_n + tumor_n) %>% mutate(Tcell_prop = Tcell_n/sum, Bcell_prop = Bcell_n/sum)
+df <- df[-28, ]# CA83 fat has no normal cells
+microscopy <- microscopy %>% filter(FF_ID %in% df$sample)
+microscopy <- microscopy %>% mutate(quan_CD3  = ntile(CD3, 5), quan_CD8  = ntile(CD8, 5), quan_CD20  = ntile(CD20, 5))
+
+plotdf <- merge(df, microscopy, by.x = "sample", by.y ="FF_ID")
+plotdf$patient <- substr(plotdf$sample, 1, 6)
+
+pdf("microscopy_cor_cellprop.pdf", width = 6, height = 5)
+ggplot(plotdf, aes(x = as.factor(quan_CD3), y = Tcell_prop)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(colour = patient)) + labs(x = "bins of CD3 intensity", y = "T cell proportion", title = paste("correlation between CD3 stain and T cell proportion:", round(cor(plotdf$Tcell_prop, plotdf$CD3), 3)))+theme_bw()
+
+ggplot(plotdf, aes(x = CD3, y = Tcell_prop,colour = patient)) + geom_point() +  geom_smooth(method=lm, color="black", se=FALSE)+ labs(x = "CD3 intensity", y = "T cell proportion", title = paste("correlation between CD3 stain and T cell proportion:", round(cor(plotdf$Tcell_prop, plotdf$CD3), 3)))+theme_bw()
+
+
+ggplot(plotdf, aes(x = as.factor(quan_CD8), y = Tcell_prop)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(colour = patient)) + labs(x = "bins of CD8 intensity", y = "T cell proportion", title = paste("correlation between CD8 stain and T cell proportion:", round(cor(plotdf$Tcell_prop, plotdf$CD8), 3)))+theme_bw()
+
+ggplot(plotdf, aes(x = CD8, y = Tcell_prop,colour = patient)) + geom_point() +  geom_smooth(method=lm, color="black", se=FALSE)+ labs(x = "CD8 intensity", y = "T cell proportion", title =paste("correlation between CD8 stain and T cell proportion:", round(cor(plotdf$Tcell_prop, plotdf$CD8), 3)))+theme_bw()
+
+ggplot(plotdf, aes(x = as.factor(quan_CD20), y = Bcell_prop)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(colour = patient)) + labs(x = "bins of CD20 intensity", y = "B cell proportion", title = paste("correlation between CD20 stain and B cell proportion:", round(cor(plotdf$Bcell_prop, plotdf$CD20), 3)))+theme_bw()
+
+ggplot(plotdf, aes(x = CD20, y = Bcell_prop,colour = patient)) + geom_point() +  geom_smooth(method=lm, color="black", se=FALSE)+ labs(x = "CD20 intensity", y = "B cell proportion", title =paste("correlation between CD20 stain and B cell proportion:", round(cor(plotdf$Bcell_prop, plotdf$CD20), 3)))+theme_bw()
+dev.off()
+
+```
+
+
+
+
+
+
+
+## try ruv3 then harmoy
+```{r fig.height=10, fig.width=10}
+
+  DefaultAssay(normal2) <- "ruv3"
+  normal3 <- FindVariableFeatures(normal2, selection.method = "mean.var.plot", nfeatures = 2000)
+  normal3 <- ScaleData(normal3, do.scale = F, do.center = F)
+  normal3 <- RunPCA(normal3, features = VariableFeatures(object = normal3))
+  normal3 <- RunHarmony(normal3, "patient", assay.use = "ruv3")
+  normal3 <- normal3 %>% 
+    RunUMAP(reduction = "harmony", dims = 1:20) %>% 
+    FindNeighbors(reduction = "harmony", dims = 1:20) 
+  normal3 <- FindClusters(normal3, resolution = 0.5, graph.name  = "RNA_snn") %>% 
+    identity()
+  
+DimPlot(normal3, label = T, group.by = "cell_anno") + NoLegend()
+DimPlot(normal3,  label = T, group.by = "cell_id")
+DimPlot(normal3, label = T)
+
+```

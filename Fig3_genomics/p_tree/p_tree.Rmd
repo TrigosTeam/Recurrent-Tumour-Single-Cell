@@ -1,0 +1,405 @@
+---
+title: "p_tree"
+output: html_document
+---
+
+```{r data preprocessing, echo=FALSE, include=FALSE}
+library(phangorn)
+library(gridExtra)
+library(dendextend)
+library(data.table)
+library(dplyr)
+data <- readRDS("~/CASCADEpaper/paper/Fig3_genomics/point_mutation/point_mutation_table_intersection.Rds")
+data <- rbindlist(data, idcol = "sample")
+data <- data[data$sample != "CA0035_left_paraaortic_lymph_node_track_1B", ]
+data$variant<- paste(data$CHROM, data$POS, data$REF, data$ALT, sep = ";")
+data$patient <- gsub("00", "", substr(data$sample, 1, 6))
+data <- data[data$patient %in% c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90"),]
+
+sites <- data$sample
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+data$site <- sites
+data$labs <- paste(data$site, sapply(strsplit(data$sample, split = "_"), function(x) tail(x, 1)) )
+
+```
+
+## p tree for all patients 
+no filtering applied here
+based on variants: CHROM + POS + REF + ALT
+
+```{r all patient, echo=FALSE}
+id<- unique(data$sample)
+m<- matrix(ncol = 33, nrow = 33)
+colnames(m) <- id
+rownames(m) <- id
+ftab <- data.frame(table(data$variant, data$sample))
+
+for ( i in id){
+  temp1 <- ftab$Freq[ftab$Var2==i]
+  for (n in id[id!=i]){
+    temp2 <- ftab$Freq[ftab$Var2==n]
+    m[i, n] <- sum(temp1 != temp2)
+  }
+}
+diag(m) <- 0
+m <- as.dist(m)
+
+treeUPGMA  <- as.dendrogram(hclust(m, method = "centroid"))
+treeWPGMA  <- wpgma(m)
+treeNJ  <- NJ(m)
+
+plot(treeUPGMA, main = "upgma")
+plot(treeWPGMA, main = "wpgma")
+plot(treeNJ, main = "NJ")
+```
+
+## p_tree for each patiant 
+based on variants: MODIFIER vatirants excluded 
+```{r variant, echo=FALSE}
+
+test <- data %>% filter(IMPACT != "MODIFIER") %>% filter(as.numeric(MAX_AF )<0.1 | is.na(as.numeric(MAX_AF)))
+test <- test[, c("variant", "labs", "patient")] 
+test <- distinct(test)
+
+treeUPGMA <- list()
+treeWPGMA <- list()
+treeNJ <- list()
+dism_snp <- list()
+for ( p in c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90")){
+  sa <- unique(test$labs[test$patient == p])
+  m <- matrix(ncol = length(sa), nrow = length(sa))
+  colnames(m) <- sa
+  rownames(m) <- sa
+  tem <- subset(test, patient == p)
+  ftab <- data.frame(table(tem$variant, tem$labs))
+  for ( i in sa){
+    temp1 <- ftab$Freq[ftab$Var2==i]
+    for (n in sa[sa!=i]){
+      temp2 <- ftab$Freq[ftab$Var2==n]
+      m[i, n] <- sum(temp1 != temp2)
+    }
+  }
+  diag(m) <- 0
+  dism_snp[[p]] <- m
+  m <- as.dist(m)
+  treeUPGMA[[p]]<- upgma(m)
+  treeWPGMA[[p]] <- wpgma(m)
+  treeNJ[[p]] <- try(NJ(m))
+}
+
+
+
+for ( p in c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90")){
+  plot(treeUPGMA[[p]], main = p)
+}
+
+
+saveRDS(dism_snp, "dism_snp.Rds")
+```
+
+```{r}
+saveRDS(treeUPGMA, "treeUPGMA.Rds")
+library(cluster)
+library(Seurat)
+
+pairwise.mahalanobis = function(x, grouping=NULL, cov =NULL, inverted=FALSE, digits = 5, ...) {
+    x <- if (is.vector(x))                                  #standardize input data as matrix
+      matrix(x, ncol = length(x))
+    else as.matrix(x)
+    
+    if(!is.matrix(x))
+      stop("x could not be forced into a matrix")
+    
+    if(length(grouping) ==0){                               #no group assigned, uses first col
+      grouping = t(x[1])
+      x = x[2:dim(x)[2]]    
+      cat("assigning grouping\n")
+      print(grouping)
+    }
+    
+    n <- nrow(x)
+    p <- ncol(x)
+    
+    if (n != length(grouping)){                                 #grouping and matrix do not correspond
+      cat(paste("n: ", n, "and groups: ", length(grouping), "\n"))
+      stop("nrow(x) and length(grouping) are different")
+    }
+    g <- as.factor(grouping)
+    g
+    lev <- lev1 <- levels(g)                                # Groups
+    counts <- as.vector(table(g))                           # No. of elements in each group
+    
+    if (any(counts == 0)) {                             # Remove grouping if not represented in data
+      empty <- lev[counts == 0]
+      warning(sprintf(ngettext(length(empty), "group %s is empty", 
+                               "groups %s are empty"), paste(empty, collapse = " ")), 
+              domain = NA)
+      lev1 <- lev[counts > 0]
+      g <- factor(g, levels = lev1)
+      counts <- as.vector(table(g))
+    }
+    
+    ng = length(lev1)
+    
+    group.means <- tapply(x, list(rep(g, p), col(x)), mean)     # g x p matrix of group means from x
+    
+    if(missing(cov)){                                           #create covariance matrix
+      inverted = FALSE
+      cov = cor(x)                                          #standardize into correlation mtx
+    }
+    else{                                                       #check cov of correct dimension
+      if(dim(cov) != c(p,p))
+        stop("cov matrix not of dim = (p,p)\n")
+    }
+    
+    Distance = matrix(nrow=ng, ncol=ng)                                 #initialize distance matrix 
+    dimnames(Distance) = list(names(group.means), names(group.means))
+    
+    Means = round(group.means, digits)
+    Cov = round(cov, digits)
+    Distance = round(Distance, digits)
+    
+    for(i in 1:ng){
+      Distance[i,]= mahalanobis(group.means, group.means[i,], cov, inverted)
+    }
+    
+    result <- list(means = group.means, cov = cov, distance = Distance)
+    result
+  }
+  # md <- pairwise.mahalanobis(pca, grouping = perp_srt$sample) #the distance doesnot match observation of UMAP
+  # mdis <- sqrt(md$distance)
+  # perp_srt$labs <- paste(gsub("00", "", perp_srt$patient), perp_srt$site, sapply(strsplit(perp_srt$sample, split = "_"), function(x) tail(x, 1)) )
+  # labs <- unique(perp_srt$labs)
+  # colnames(mdis) <- labs
+  # rownames(mdis) <- labs
+  # patient <- unique(gsub("00", "", perp_srt$patient))
+  # mdis <- mdis[rownames(dism_snp[[patient]]), colnames(dism_snp[[patient]])]
+  # mddf <- melt(mdis) %>% mutate(obj = paste(Var1, Var2)) %>% select(c("value", "obj")) %>% `colnames<-`(c("RNA_md", "obj"))
+  # snpdf <-  melt(dism_snp[[patient]]) %>% mutate(obj = paste(Var1, Var2)) %>% select(c("value", "obj")) %>% `colnames<-`(c("SNP_dis", "obj"))
+  # df <- merge(mddf, snpdf, by = "obj") 
+  # head(df)
+
+
+paths <- system("realpath ~/integration/2024_06/perpatient/tumor_only/*_ruvsrt.Rds", intern = T)
+paths_split <- substr(unlist(lapply(strsplit(paths, split = "/"), function(x) x[8])),1 ,6) 
+paths <- setNames(paths, paths_split)
+
+
+sh_list <- list()
+dist_list <- list()
+for (p in paths_split){
+  perp_srt <- readRDS(paths[p])
+  perp_srt$labs <- paste(gsub("00", "", perp_srt$patient), perp_srt$site, sapply(strsplit(perp_srt$sample, split = "_"), function(x) tail(x, 1)) )
+  pca <- Embeddings(perp_srt, "pca")
+  eu_dist <- as.matrix(dist(pca[, 1:20]))
+  sh <- as.data.frame(silhouette(x = as.integer(factor(perp_srt$labs)), dmatrix = eu_dist))
+  cluster <- factor(perp_srt$labs)
+  labs <- setNames(levels(cluster),unique(as.integer(cluster)))
+  sh$cluster <- labs[as.character(sh$cluster)]
+  sh$neighbor <- labs[as.character(sh$neighbor)]
+  sh <- reshape2::dcast(sh, value.var = "sil_width", cluster~neighbor, fun.aggregate = mean) 
+  rownames(sh) <- sh$cluster
+  sh_list[[p]] <- sh
+  
+  xy <- t(combn(colnames(dism_snp[[patient]]), 2))
+  snpdf <- data.frame(xy, dist = dism_snp[[patient]][xy]) %>% mutate(obj = paste(X1, X2)) %>% select(c("dist", "obj")) %>% `colnames<-`(c("SNP_dis", "obj"))
+  shdf <-  data.frame(xy, dist = sh[xy]) %>% mutate(obj = paste(X1, X2)) %>% select(c("dist", "obj")) %>% `colnames<-`(c("avg_sil_width", "obj"))
+
+  df <- merge(snpdf, shdf, by = "obj", all.x = T, all.y = F)
+  dist_list[[p]] <- df
+}
+
+
+ggplot(df, aes(x = avg_sil_width, SNP_dis)) + geom_point()
+```
+
+
+
+
+
+```{r}
+library(ggtree)
+library(ggplot2)
+
+plotlist <- list()
+for ( p in c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90")){
+  treeUPGMA[[p]]$tip.label <- gsub(paste0(p, " "), "",treeUPGMA[[p]]$tip.label )
+  plotlist[[p]] <- ggtree(treeUPGMA[[p]]) + theme_tree2()+geom_tiplab(size = 5)+ggplot2::xlim(0, max(treeUPGMA[[p]]$edge.length)*2.2) +
+    ggplot2::ggtitle(p)+
+    ggplot2::theme(plot.title = element_text(size = 16))
+  if(p == "CA90"){
+    plotlist[[p]] <- ggtree(treeUPGMA[[p]]) + theme_tree2()+geom_tiplab(size = 5)+ggplot2::xlim(0, max(treeUPGMA[[p]]$edge.length)*2.5) +
+    ggplot2::ggtitle(p)+
+    ggplot2::theme(plot.title = element_text(size = 16),
+                   plot.margin = margin(0,0,0, 0),
+                   plot.background = element_rect(fill = "transparent", color = NA))
+  }
+}
+combined_plot <- patchwork::wrap_plots(plotlist, ncol = 9)
+print(combined_plot)
+
+ggsave("p_tree.pdf", width = 18, height = 2.8, bg = "transparent")
+
+```
+
+
+based on CNV
+```{r}
+cnlist <- readRDS("~/CASCADEpaper/paper/Fig3_genomics/copy_number/cnlist.Rds")
+cnlist <- rbindlist(cnlist, idcol = "sample")
+cnlist <- cnlist[cnlist$sample != "CA0035_left_paraaortic_lymph_node_track_1B", ]
+cnlist$variant<- paste(cnlist$chromosome, cnlist$start, cnlist$end, cnlist$copyNumber, sep = ";")
+cnlist$patient <- gsub("00", "", substr(cnlist$sample, 1, 6))
+cnlist <- cnlist[cnlist$patient %in% c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90"),]
+
+sites <- cnlist$sample
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+cnlist$site <- sites
+cnlist$labs <- paste(cnlist$patient, cnlist$site, sapply(strsplit(cnlist$sample, split = "_"), function(x) tail(x, 1)) )
+```
+
+
+```{r CNV tree}
+
+treeUPGMA_cnv <- list()
+treeWPGMA_cnv <- list()
+dism_cnv <- list()
+for ( p in c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90")){
+  sa <- unique(cnlist$labs[cnlist$patient == p])
+  m <- matrix(ncol = length(sa), nrow = length(sa))
+  colnames(m) <- sa
+  rownames(m) <- sa
+  tem <- subset(cnlist, patient == p)
+  ftab <- data.frame(table(tem$variant, tem$labs))
+  for ( i in sa){
+    temp1 <- ftab$Freq[ftab$Var2==i]
+    for (n in sa[sa!=i]){
+      temp2 <- ftab$Freq[ftab$Var2==n]
+      m[i, n] <- sum(temp1 != temp2)
+    }
+  }
+  diag(m) <- 0
+  m <- as.dist(m)
+  treeUPGMA_cnv[[p]]<- upgma(m)
+  treeWPGMA_cnv[[p]] <- wpgma(m)
+  dism_cnv[[p]] <- m
+}
+
+
+for ( p in c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90")){
+  plot(treeWPGMA_cnv[[p]], main = p)
+}
+
+
+
+```
+
+```{rn sumCNV and SNP distance}
+for ( p in c("CA27", "CA34", "CA35", "CA43", "CA46", "CA58", "CA76","CA83",  "CA90")){
+  m <- dism_cnv[[p]]+dism_snp[[p]]
+  plot(upgma(m), main = p)
+}
+```
+
+
+based on GENE, data is filtered by the genes tier 1 census in COSMIC
+```{r gene, echo= FALSE}
+genelist <- read.csv("~/SO_terms/script/Census_allThu Mar 24 05_38_11 2022.csv")
+test <- subset(data, GENE %in% genelist$Gene.Symbol)
+treeUPGMA <- list()
+treeWPGMA <- list()
+treeNJ <- list()
+for ( p in pa){
+  sa <- unique(test$Sample[test$Patient == p])
+  m <- matrix(ncol = length(sa), nrow = length(sa))
+  colnames(m) <- sa
+  rownames(m) <- sa
+  tem <- subset(test, Patient == p)
+  ftab <- data.frame(table(tem$GENE, tem$Sample))
+  for ( i in sa){
+    temp1 <- ftab$Freq[ftab$Var2==i]
+    for (n in sa[sa!=i]){
+      temp2 <- ftab$Freq[ftab$Var2==n]
+      m[i, n] <- sum(temp1 != temp2)
+    }
+  }
+  diag(m) <- 0
+  m <- as.dist(m)
+  treeUPGMA[[p]]<- upgma(m)
+  treeWPGMA[[p]]  <- wpgma(m)
+  treeNJ[[p]]  <- NJ(m)
+}
+
+par(mfrow = c(1, 3))
+for (i in seq(length(treeUPGMA))){
+  plot(treeUPGMA[[i]], main = paste(names(treeUPGMA[i]), "UPGMA"))
+}
+for (i in seq(length(treeWPGMA))){
+  plot(treeWPGMA[[i]], main = paste(names(treeWPGMA[i]), "WPGMA"))
+}
+for (i in seq(length(treeNJ))){
+  plot(treeNJ[[i]], main = paste(names(treeNJ[i]), "NJ"))
+}
+
+```
+
+## assesing the quality of the tree 
+for trees based on variants 
+```{r parisomy score, echo=TRUE}
+test<- subset(data, Impact != "MODIFIER")
+treeUPGMA <- list()
+treeWPGMA <- list()
+treeNJ <- list()
+phy_tab <- list()
+for ( p in pa){
+  sa <- unique(test$Sample[test$Patient == p])
+  m <- matrix(ncol = length(sa), nrow = length(sa))
+  colnames(m) <- sa
+  rownames(m) <- sa
+  tem <- subset(test, Patient == p)
+  ftab <- data.frame(table(tem$variant, tem$Sample))
+  tm<-as.matrix(data.frame(rbind(table(tem$Sample, tem$variant))))
+  phy_m <- as.phyDat(tm, type="USER", levels = c(0, 1))
+  for ( i in sa){
+    temp1 <- ftab$Freq[ftab$Var2==i]
+    for (n in sa[sa!=i]){
+      temp2 <- ftab$Freq[ftab$Var2==n]
+      m[i, n] <- sum(temp1 != temp2)
+    }
+  }
+  diag(m) <- 0
+  
+  m <- as.dist(m)
+  treeUPGMA[[p]]<- upgma(m)
+  treeWPGMA[[p]]  <- wpgma(m)
+  treeNJ[[p]]  <- NJ(m)
+  phy_tab [[p]] <- phy_m
+}
+
+for( i in seq(3)){
+  parsimony(treeUPGMA[[i]], phy_tab[[i]])
+  parsimony(treeWPGMA[[i]], phy_tab[[i]])
+  parsimony(treeNJ[[i]], phy_tab[[i]])
+}
+```
+

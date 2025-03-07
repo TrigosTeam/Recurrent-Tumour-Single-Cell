@@ -1,0 +1,438 @@
+---
+title: "Heatmaps signature"
+output: html_notebook
+---
+
+### signature module score matrix previously through sbatch file
+```{r paper figure}
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+library(cluster)
+source("~/CASCADEpaper/paper/cols.R")
+load("/trigos_team/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
+genelist <- lapply(all_gene_sets, function(x) unique(unlist(x))) # union of different signatures
+
+tang_2022 <- all_gene_sets$tang_2022
+names(tang_2022) <- paste0("tang_2022_", names(tang_2022))
+
+temp <- lapply(all_gene_sets, function(x){
+  names(which(table(unlist(x)) >= length(x)/2))
+})
+
+temp <- temp[!names(temp)%in% c("CRPC", "cancer", "hillock", "metastasis", "club", "invasion", "tang_2022")]
+genelist <- c(temp, tang_2022)
+names(genelist) <- paste0(names(genelist), "_signature")
+meta <- readRDS("~/CASCADEpaper/paper/Fig2_signature/signature_meta_tumor_only.Rds")
+
+
+signature_score <- meta[, names(genelist)[1:20]]
+apply(signature_score, 2, var)
+
+signature_score$sample <- meta$sample
+
+sigature_list <- split(signature_score, signature_score$sample)
+signature_mat <- lapply(sigature_list, function(x){
+  return(as.data.frame(colMeans(x[, 1:20])) %>% `colnames<-`(unique(x[,21])))
+})
+
+signature_mat <- as.matrix(Reduce(cbind, signature_mat))
+rownames(signature_mat) <- gsub("_signature", "", rownames(signature_mat))
+
+calc_zscore <- function(x){
+  (x-mean(x))/sd(x)
+}
+
+```
+```{r}
+sites <- colnames(signature_mat)
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+
+patients <- gsub("00", "", substr(colnames(signature_mat), 1, 6))
+classes <- ifelse(patients %in% c("CA27", "CA58"), "Mixed", ifelse(patients %in% c("CA46", "CA90"), "NE", "AD"))
+
+sub_mat <- signature_mat[!rownames(signature_mat) %in% c("AR", "NE"), ]
+colAR <- colorRamp2(c(min(signature_mat[c("AR"),]),0,  max(signature_mat[c("AR"),])), c( "seagreen", "#EEEEEE", "orange"))
+colNE <-  colorRamp2(c(min(signature_mat[c("NE"),]),0,  max(signature_mat[c("NE"),])), c( "purple", "#EEEEEE", "yellow"))
+ha2 <- HeatmapAnnotation(phenotype = classes, 
+                        patient = patients, 
+                        site = sites, 
+                        AR = signature_mat[c("AR"),],
+                        NE = signature_mat[c("NE"),],
+                        col = list(phenotype = structure(brewer.set2(3), names = unique(classes)),
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites)), 
+                                   AR = colAR, 
+                                   NE = colNE))
+sub_sub_mat <- sub_mat[!rownames(sub_mat) %in% c("CRPC", "cancer", "hillock", "metastasis", "club", "invasion"),]
+ha3 <- HeatmapAnnotation(
+                        patient = patients, 
+                        site = sites, 
+                        AR = signature_mat[c("AR"),],
+                        NE = signature_mat[c("NE"),],
+                        col = list(
+                                   patient  = patient_cols,
+                                   site = structure(brewer.set3(10), names = unique(sites)), 
+                                   AR = colAR, 
+                                   NE = colNE))
+col_order <- sort(signature_mat["AR", ], decreasing = T)
+
+
+test <- t(apply(sub_sub_mat, 1, calc_zscore))
+f4 <- colorRamp2(c(min(test),median(test),  max(test)), c( "blue", "#EEEEEE", "red"))
+ht <- Heatmap(test, name = "module\nscore\nzscore", col = f4, 
+        show_column_names = F, show_row_dend = T, show_column_dend = F, 
+        top_annotation = ha3, rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = cluster::diana(test),
+        cluster_columns = T, 
+        row_names_gp = grid::gpar(fontsize = 14),
+        column_split = factor(classes, levels = c("AD", "Mixed", "NE")), cluster_column_slices = F,
+         heatmap_legend_param = list(direction = "horizontal",title_position = "leftcenter"))
+ht_opt$COLUMN_ANNO_PADDING= unit(1, "mm")
+pdf("~/CASCADEpaper/paper/Fig2_signature/pdf/heatmap.pdf", width = 10*0.7, height = 6*0.7)
+draw(ht, merge_legend = F, annotation_legend_side = "right", 
+     heatmap_legend_side = "bottom", 
+     padding = unit(c(2, 2, 2, 10), "mm"))
+dev.off()
+saveRDS(ht, "~/CASCADEpaper/paper/Fig2_signature/plot_obj/heatmap.Rds")
+
+```
+
+
+
+### scaled matrix with clustering
+```{r fig.height=6, fig.width=8}
+calc_zscore <- function(x){
+  (x-mean(x))/sd(x)
+}
+
+cal_normalized <- function(x){
+  (x - min(x))/(max(x) - min(x))
+}
+
+scaled_zscore <- apply(signature_mat, 2, function(x){
+  temp <-  calc_zscore(x)
+  return(cal_normalized(temp))
+})
+
+scaled_expression <- apply(signature_mat,2, cal_normalized)
+
+f1 = colorRamp2(seq(min(scaled_expression), max(scaled_expression), length = 3), c("blue", "#EEEEEE", "red"))
+
+sites <- colnames(scaled_expression)
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+
+patients <- gsub("00", "", substr(colnames(scaled_expression), 1, 6))
+classes <- ifelse(patients %in% c("CA27", "CA58"), "Mixed", ifelse(patients %in% c("CA46", "CA90"), "NE", "AD"))
+
+ha <- HeatmapAnnotation(phenotype = classes, 
+                        patient = patients, 
+                        site = sites, 
+                        col = list(phenotype = structure(brewer.set2(3), names = unique(classes)),
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites))))
+
+Heatmap(scaled_expression, name = "scaled module score", col = f1, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha, rect_gp = gpar(col = "white", lwd = 2))
+
+
+```
+### unscaled mat group by patients
+```{r fig.height=6, fig.width=10}
+f2 = colorRamp2(c(min(signature_mat),0,  max(signature_mat)), c( "blue", "#EEEEEE", "red"))
+
+sites <- colnames(signature_mat)
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+
+patients <- gsub("00", "", substr(colnames(signature_mat), 1, 6))
+classes <- ifelse(patients %in% c("CA27", "CA58"), "Mixed", ifelse(patients %in% c("CA46", "CA90"), "NE", "AD"))
+
+ha <- HeatmapAnnotation(phenotype = classes, 
+                        patient = patients, 
+                        site = sites, 
+                        col = list(phenotype = structure(brewer.set2(3), names = unique(classes)),
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites))))
+
+Heatmap(signature_mat, name = "module score", col = f2, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha, rect_gp = gpar(col = "white", lwd = 2), cluster_columns = F)
+```
+group by sites
+```{r fig.height=6, fig.width=10}
+Heatmap(signature_mat, name = "module score", col = f2, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha, rect_gp = gpar(col = "white", lwd = 2), column_order = order(sites))
+```
+```{r fig.height=6, fig.width=10}
+sub_mat <- signature_mat[!rownames(signature_mat) %in% c("AR", "NE"), ]
+colAR <- colorRamp2(c(min(signature_mat[c("AR"),]),0,  max(signature_mat[c("AR"),])), c( "seagreen", "#EEEEEE", "orange"))
+colNE <-  colorRamp2(c(min(signature_mat[c("NE"),]),0,  max(signature_mat[c("NE"),])), c( "purple", "#EEEEEE", "yellow"))
+ha2 <- HeatmapAnnotation(phenotype = classes, 
+                        patient = patients, 
+                        site = sites, 
+                        AR = signature_mat[c("AR"),],
+                        NE = signature_mat[c("NE"),],
+                        col = list(phenotype = structure(brewer.set2(3), names = unique(classes)),
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites)), 
+                                   AR = colAR, 
+                                   NE = colNE))
+f3 <- colorRamp2(c(min(sub_mat),0,  max(sub_mat)), c( "blue", "#EEEEEE", "red"))
+Heatmap(sub_mat, name = "module score", col = f3, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha2, rect_gp = gpar(col = "white", lwd = 2), cluster_columns = F)
+
+```
+
+after discussion with sheenhee, some signature can be removed and order by pathology phenotype
+```{r fig.height=5, fig.width=7}
+sub_sub_mat <- sub_mat[!rownames(sub_mat) %in% c("CRPC", "cancer", "hillock", "metastasis", "club", "invasion"),]
+ha3 <- HeatmapAnnotation(
+                        patient = patients, 
+                        site = sites, 
+                        AR = signature_mat[c("AR"),],
+                        NE = signature_mat[c("NE"),],
+                        col = list(
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites)), 
+                                   AR = colAR, 
+                                   NE = colNE))
+col_order <- sort(signature_mat["AR", ], decreasing = T)
+
+Heatmap(sub_sub_mat, name = "module score", col = f3, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha3, rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_columns = F, column_order = names(col_order), 
+        column_split = factor(classes, levels = c("AD", "Mixed", "NE")), cluster_column_slices = F)
+```
+```{r}
+library(cluster)
+test <- t(apply(sub_sub_mat, 1, calc_zscore))
+f4 <- colorRamp2(c(min(test),median(test),  max(test)), c( "blue", "#EEEEEE", "red"))
+ht <- Heatmap(test, name = "module\nscore\nzscore", col = f4, 
+        show_column_names = F, show_row_dend = T, show_column_dend = F, 
+        top_annotation = ha3, rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = cluster::diana(test),
+        cluster_columns = T, 
+        column_split = factor(classes, levels = c("AD", "Mixed", "NE")), cluster_column_slices = F,
+         heatmap_legend_param = list(direction = "horizontal",title_position = "leftcenter"))
+ht_opt$COLUMN_ANNO_PADDING= unit(1, "mm")
+png("~/CASCADEpaper/paper/Fig2_signature/png/heatmap.png", width = 500, height = 300)
+draw(ht, merge_legend = F, annotation_legend_side = "right", 
+     heatmap_legend_side = "bottom", 
+     padding = unit(c(2, 2, 2, 10), "mm"))
+dev.off()
+saveRDS(ht, "~/CASCADEpaper/paper/Fig2_signature/plot_obj/heatmap.Rds")
+
+```
+
+
+```{r}
+Heatmap(test[, classes == "AD"],name = "module\nscore\nzscore", col = f4, 
+        show_column_names = T, show_row_dend = T, show_column_dend = F, 
+        rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = diana,
+        cluster_columns = F)
+Heatmap(test[, classes == "Mixed"],name = "module\nscore\nzscore", col = f4, 
+        show_column_names = T, show_row_dend = T, show_column_dend = F, 
+        rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = diana,
+        cluster_columns = F)
+Heatmap(test[, classes == "NE"],name = "module\nscore\nzscore", col = f4, 
+        show_column_names = T, show_row_dend = T, show_column_dend = F, 
+        rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = diana,
+        cluster_columns = F)
+```
+```{r}
+classes2  <- ifelse(grepl("CA0046|CA0090|CA0058_liver",colnames(test)), "NE", "AD")
+ind <- classes2 == "AD"
+ha_AD <- HeatmapAnnotation(patient = patients[ind], 
+                        site = sites[ind], 
+                        AR = signature_mat[c("AR"),ind],
+                        NE = signature_mat[c("NE"),ind],
+                        col = list(
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites)), 
+                                   AR = colAR, 
+                                   NE = colNE), 
+                        show_annotation_name = F)
+
+htAD <- Heatmap(test[, ind], name = "module\nscore\nzscore", col = f4, 
+        show_column_names = F, show_row_dend = T, show_column_dend = F, 
+        top_annotation = ha_AD, rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = diana,
+        cluster_columns = T, column_title = "AD")
+
+ind <- classes2 == "NE"
+ha_NE <- HeatmapAnnotation(patient = patients[ind], 
+                        site = sites[ind], 
+                        AR = signature_mat[c("AR"),ind],
+                        NE = signature_mat[c("NE"),ind],
+                        col = list(
+                                   patient  = structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient))),
+                                   site = structure(brewer.set3(10), names = unique(sites)), 
+                                   AR = colAR, 
+                                   NE = colNE))
+
+htNE <- Heatmap(test[, ind], name = "module\nscore\nzscore", col = f4, 
+        show_column_names = F, show_row_dend = T, show_column_dend = F, 
+        top_annotation = ha_NE, rect_gp = gpar(col = "white", lwd = 2), 
+        cluster_rows = diana,
+        cluster_columns = T, column_title = "NE")
+
+draw(htAD+htNE, merge_legend = T, )
+```
+
+
+
+## per patient 
+```{r fig.height=4, fig.width=7}
+paths <- list.files("~/CASCADEpaper/paper/Fig2", pattern =  "_signature_meta.Rds", full.names = T)
+
+sites <- colnames(scaled_expression)
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+
+patients <- gsub("00", "", substr(colnames(scaled_expression), 1, 6))
+classes <- ifelse(patients %in% c("CA27", "CA58"), "Mixing", ifelse(patients %in% c("CA46", "CA90"), "NE", "AD"))
+phenotye_col <- structure(brewer.set2(3), names = unique(classes))
+patient_col <- structure(brewer.set1(9), names = gsub("00", "", unique(meta$patient)))
+site_col <- structure(brewer.set3(10), names = unique(sites))
+
+
+
+metas <- lapply(paths, readRDS)
+lapply(metas, function(pp_meta){
+  signature_score <- pp_meta[, names(genelist)]
+apply(signature_score, 2, var)
+signature_score <- signature_score[, 1:26]
+signature_score$sample <- substr(rownames(signature_score), 1, (nchar(rownames(signature_score))-19))
+
+sigature_list <- split(signature_score, signature_score$sample)
+signature_mat <- lapply(sigature_list, function(x){
+  return(as.data.frame(colMeans(x[, 1:26])) %>% `colnames<-`(unique(x[,27])))
+})
+
+signature_mat <- as.matrix(Reduce(cbind, signature_mat))
+f2 = colorRamp2(c(min(signature_mat),0,  max(signature_mat)), c( "blue", "#EEEEEE", "red"))
+
+sites <- colnames(signature_mat)
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+
+patients <- gsub("00", "", substr(colnames(signature_mat), 1, 6))
+classes <- ifelse(patients %in% c("CA27", "CA58"), "Mixing", ifelse(patients %in% c("CA46", "CA90"), "NE", "AD"))
+
+ha <- HeatmapAnnotation(phenotype = classes,
+                        site = sites, 
+                        col = list(phenotype = phenotye_col[classes],
+                                   site = site_col[sites]), 
+                        gp = gpar(fontface = "bold"))
+
+Heatmap(signature_mat, name = "module score", col = f2, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha, rect_gp = gpar(col = "white", lwd = 2), cluster_columns = T, cluster_rows = T, 
+        width = unit(2, "cm"), height = unit(8, "cm"), row_names_gp = gpar(fontsize = 9), 
+        column_title = unique(patients))
+
+})
+```
+
+
+```{r}
+lapply(metas, function(pp_meta){
+  signature_score <- pp_meta[, names(genelist)]
+apply(signature_score, 2, var)
+signature_score <- signature_score[, 1:26]
+signature_score$sample <- substr(rownames(signature_score), 1, (nchar(rownames(signature_score))-19))
+
+sigature_list <- split(signature_score, signature_score$sample)
+signature_mat <- lapply(sigature_list, function(x){
+  return(as.data.frame(colMeans(x[, 1:26])) %>% `colnames<-`(unique(x[,27])))
+})
+
+signature_mat <- as.matrix(Reduce(cbind, signature_mat))
+f2 = colorRamp2(c(min(signature_mat),0,  max(signature_mat)), c( "blue", "#EEEEEE", "red"))
+
+sites <- colnames(signature_mat)
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+
+
+patients <- gsub("00", "", substr(colnames(signature_mat), 1, 6))
+classes <- ifelse(patients %in% c("CA27", "CA58"), "Mixing", ifelse(patients %in% c("CA46", "CA90"), "NE", "AD"))
+
+ha <- HeatmapAnnotation(phenotype = classes,
+                        site = sites, 
+                        col = list(phenotype = phenotye_col[classes],
+                                   site = site_col[sites]), 
+                        gp = gpar(fontface = "bold"))
+
+Heatmap(signature_mat, name = "module score", col = f2, 
+        show_column_names = F, show_row_dend = F, show_column_dend = F, 
+        top_annotation = ha, rect_gp = gpar(col = "white", lwd = 2), cluster_columns = T, cluster_rows = F, 
+        width = unit(2, "cm"), height = unit(8, "cm"), row_names_gp = gpar(fontsize = 9), 
+        column_title = unique(patients))
+
+})
+```
+

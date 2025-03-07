@@ -1,0 +1,767 @@
+---
+title: "Sigrap cross-sample summaries"
+output: html_notebook
+---
+
+## Libraries
+```{r}
+library("ggplot2")
+library("matrixStats")
+library("rankdist")
+library(paletteer)
+library(dplyr)
+```
+
+
+## Get data
+```{r}
+out_paths <- system("realpath /trigos_team/CASCADE/Sequencing_updated_reference/CA*/*/sigrap", intern = T)
+ids <- sapply(strsplit(out_paths, "/"), `[`, 5)
+sites <- sapply(strsplit(out_paths, "/"), `[`, 6)
+sites[14] <- "liver__12"
+ind <- ids %in% c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090")
+out_paths <- out_paths[ids %in% c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090")]
+ids <- ids[ids %in% c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090")]
+sites <- sites[ind]
+
+hrdetect_paths <- paste0(out_paths, "/hrdetect_out.Rds")
+chord_paths <- paste0(out_paths, "/chord_out.Rds")
+cosmic_sbs_v2_paths <- paste0(out_paths, "/sigs_snv_2015.Rds")
+cosmic_sbs_v3.2_paths <- paste0(out_paths, "/sigs_snv_2020.Rds")
+cosmic_dbs_v3.2_paths <- paste0(out_paths, "/sigs_dbs_2020.Rds")
+cosmic_indel_v3.2_paths <- paste0(out_paths, "/sigs_indel_2020.Rds")
+
+hrdetect_outs <- lapply(hrdetect_paths, readRDS)
+chord_outs <- lapply(chord_paths, readRDS)
+cosmic_sbs_v2_outs <- lapply(cosmic_sbs_v2_paths, readRDS)
+cosmic_sbs_v3.2_outs <- lapply(cosmic_sbs_v3.2_paths, readRDS)
+cosmic_dbs_v3.2_outs <- lapply(cosmic_dbs_v3.2_paths, readRDS)
+cosmic_indel_v3.2_outs <- lapply(cosmic_indel_v3.2_paths, readRDS)
+```
+
+## Add metadata
+```{r}
+ages <- setNames(c(71, 56, 71, 69, 59, 59, 69, 67, 67), c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090"))
+#NOTE: this has been imputed with CA0035 set to the max value
+psa <- setNames(c(2163, 8540, NA, 1363, 0.1, 104, NA, 1.34, 0.1), c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090"))
+#psa["CA0035"] <- 8540
+#psa["CA0076"] <- 0.1
+#psa.dx <- setNames(c(42, 50, 27.5, 8, NA, 4.1, 16.2), c("CA0027", "CA0034", "CA0035", "CA0043", "CA0058", "CA0083", "CA0090"))
+treat.time <- setNames(c(6, 5, 18, 6, 2, 10, 4, 1, 8), c("CA0027", "CA0034", "CA0035", "CA0043", "CA0046", "CA0058", "CA0076", "CA0083", "CA0090"))
+is.liver <- c(
+  F, F, F,
+  T, T, F,
+  F, F, F,
+  T, T, F,
+  F, T, F, F, F, F,
+  F, T, T,
+  F, T, F,
+  F, T, F, F, F,
+  F, F, T, F, F 
+)
+is.lymph <- c(
+  F, T, F,
+  F, F, T,
+  F, T, T,
+  F, F, T,
+  T, F, F, T, T, F,
+  T, F, F,
+  F, F, F,
+  T, F, F, T, F,
+  F, F, F, T, T
+)
+
+germline.source <- c("GA", "GA", "GA", "GA", "MGC", "AGRF", "GA", "AGRF", "AGRF")
+germline.source <- factor(germline.source)
+
+fastq.source <- c(
+  "GA", "AGRF", "AGRF",
+  "GA", "GA", "MGC",
+  "GA", "GA", "GA",
+  "AGRF", "GA", "AGRF",
+  "MGC", "MGC", "MGC", "MGC", "MGC", "MGC",
+  "AGRF", "AGRF", "AGRF",
+  "MGC", "MGC", "MGC",
+  "AGRF", "AGRF", "GA", "AGRF", "GA",
+  "AGRF", "AGRF", "AGRF", "AGRF", "AGRF"
+)
+fastq.source <- factor(fastq.source)
+fastq.stats.paths <- system("realpath /trigos_team/CASCADE/Sequencing_updated_reference/*/*_*/bwa/*met", intern = T)
+fastq.stats <- do.call(rbind, lapply(fastq.stats.paths, read.table, skip = 6, header = T, nrows = 1))
+
+fastq.coverage <- fastq.stats$READ_PAIRS_EXAMINED - fastq.stats$READ_PAIR_DUPLICATES
+fastq.coverage[sites != "lung_55"] <- fastq.coverage[sites != "lung_55"] * 2 * 150 / 3117275501
+fastq.coverage[sites == "lung_55"] <- fastq.coverage[sites == "lung_55"] * 2 * 100 / 3117275501
+
+germline.stats.paths <- system("realpath /trigos_team/CASCADE/Sequencing_updated_reference/*/*/bwa/*met", intern = T)
+germline.stats.paths <- germline.stats.paths[!(germline.stats.paths %in% fastq.stats.paths)]
+germline.stats.paths <-  germline.stats.paths[sapply(strsplit(germline.stats.paths, "/"), `[`, 5) %in% ids]
+germline.stats <- do.call(rbind, lapply(germline.stats.paths, read.table, skip = 6, header = T, nrows = 1))
+
+germline.coverage <- (germline.stats$READ_PAIRS_EXAMINED - germline.stats$READ_PAIR_DUPLICATES) * 2 * 150 / 3117275501
+
+f_paths <- system("realpath /trigos_team/CASCADE/Sequencing_updated_reference/CA*/*/purple/*purity.tsv", intern = T)
+purity_stats <- do.call(rbind, lapply(f_paths[ind], read.delim))
+purity_stats$id <- ids
+purity_stats$site <- sites
+```
+
+## Visualise FASTQ stats
+```{r}
+plt_df <- data.frame(id = unique(ids), germline.source, coverage = germline.coverage)
+ggplot(plt_df, aes(x = id, y = coverage, fill = germline.source)) + geom_col() + theme(axis.text.x = element_text(size = 5, angle = 90)) + ggtitle("Germline coverage by source")
+
+plt_df <- data.frame(id = ids, site = sites, fastq.source, coverage = fastq.coverage)
+ggplot(plt_df, aes(x = site, y = coverage, fill = fastq.source)) + geom_col() + theme(axis.text.x = element_text(size = 5, angle = 90)) + facet_grid(.~id, scales = "free", space = "free") + ggtitle("Tumour coverage by source")
+```
+
+
+## HRD caller summaries
+
+### HRDetect
+Note that the original 
+```{r}
+hrdetect_ps <- sapply(hrdetect_outs, getElement, "Probability")
+plt_df <- data.frame(id = ids, site = sites, p_hrd = hrdetect_ps)
+
+#boxplot
+ggplot(plt_df, aes(x = id, y = p_hrd, group = id, fill = id)) + geom_boxplot() + ylim(0,1) + geom_hline(yintercept = 0.7)
+#barplot
+ggplot(plt_df, aes(x = site, y = p_hrd, fill = id)) + geom_col() + ylim(0,1) + geom_hline(yintercept = 0.7) + theme(axis.text.x = element_text(size = 5, angle = 90), legend.position = "none") + facet_grid(.~id, scales = "free", space = "free")
+```
+
+### CHORD
+```{r}
+chord_ps <- sapply(lapply(chord_outs, getElement, "prediction"), getElement, "p_hrd")
+plt_df <- data.frame(id = ids, site = sites, p_hrd = chord_ps)
+
+#boxplot
+ggplot(plt_df, aes(x = id, y = p_hrd, group = id, fill = id)) + geom_boxplot() + ylim(0,1) + geom_hline(yintercept = 0.5)
+#barplot - add facet_grid
+f1 <- ggplot(plt_df, aes(x = site, y = p_hrd, fill = id)) + geom_col() + ylim(0,1) + geom_hline(yintercept = 0.5) + theme(axis.text.x = element_text(size = 5, angle = 90), legend.position = "none") + facet_grid(.~id, scales = "free", space = "free")
+f1
+```
+```{r}
+chord_df <- plt_df
+```
+
+### Indel counts
+```{r}
+del.mh.counts <- lapply(chord_outs, getElement, "contexts")
+del.mh.counts <- lapply(del.mh.counts, subset.matrix, select = c("del.mh.bimh.1", "del.mh.bimh.2", "del.mh.bimh.3", "del.mh.bimh.4", "del.mh.bimh.5"))
+del.mh.counts <- sapply(del.mh.counts, sum)
+
+ins.mh.counts <- lapply(chord_outs, getElement, "contexts")
+ins.mh.counts <- lapply(ins.mh.counts, subset.matrix, select = c("ins.mh.bimh.1", "ins.mh.bimh.2", "ins.mh.bimh.3", "ins.mh.bimh.4", "ins.mh.bimh.5"))
+ins.mh.counts <- sapply(ins.mh.counts, sum)
+
+del.rep.counts <- lapply(chord_outs, getElement, "contexts")
+del.rep.counts <- lapply(del.rep.counts, subset.matrix, select = c("del.rep.len.1", "del.rep.len.2", "del.rep.len.3", "del.rep.len.4", "del.rep.len.5"))
+del.rep.counts <- sapply(del.rep.counts, sum)
+
+ins.rep.counts <- lapply(chord_outs, getElement, "contexts")
+ins.rep.counts <- lapply(ins.rep.counts, subset.matrix, select = c("ins.rep.len.1", "ins.rep.len.2", "ins.rep.len.3", "ins.rep.len.4", "ins.rep.len.5"))
+ins.rep.counts <- sapply(ins.rep.counts, sum)
+
+del.none.counts <- lapply(chord_outs, getElement, "contexts")
+del.none.counts <- lapply(del.none.counts, subset.matrix, select = c("del.none.len.1", "del.none.len.2", "del.none.len.3", "del.none.len.4", "del.none.len.5"))
+del.none.counts <- sapply(del.none.counts, sum)
+
+ins.none.counts <- lapply(chord_outs, getElement, "contexts")
+ins.none.counts <- lapply(ins.none.counts, subset.matrix, select = c("ins.none.len.1", "ins.none.len.2", "ins.none.len.3", "ins.none.len.4", "ins.none.len.5"))
+ins.none.counts <- sapply(ins.none.counts, sum)
+
+del.counts <- lapply(chord_outs, getElement, "contexts")
+del.counts <- lapply(del.counts, subset.matrix, select = c("DEL_0e00_1e03_bp", "DEL_1e03_1e04_bp", "DEL_1e04_1e05_bp", "DEL_1e05_1e06_bp", "DEL_1e06_1e07_bp"))
+del.counts <- sapply(del.counts, sum)
+
+dup.counts <- lapply(chord_outs, getElement, "contexts")
+dup.counts <- lapply(dup.counts, subset.matrix, select = c("DUP_0e00_1e03_bp", "DUP_1e03_1e04_bp", "DUP_1e04_1e05_bp", "DUP_1e05_1e06_bp", "DUP_1e06_1e07_bp"))
+dup.counts <- sapply(dup.counts, sum)
+
+inv.counts <- lapply(chord_outs, getElement, "contexts")
+inv.counts <- lapply(inv.counts, subset.matrix, select = c("INV_0e00_1e03_bp", "INV_1e03_1e04_bp", "INV_1e04_1e05_bp", "INV_1e05_1e06_bp", "INV_1e06_1e07_bp"))
+inv.counts <- sapply(inv.counts, sum)
+
+tra.counts <- lapply(chord_outs, getElement, "contexts")
+tra.counts <- unlist(lapply(tra.counts, subset.matrix, select = "TRA"))
+
+c.a.counts <- lapply(chord_outs, getElement, "contexts")
+c.a.counts <- lapply(c.a.counts, subset.matrix, select = 1:16)
+c.a.counts <- sapply(c.a.counts, sum)
+
+c.g.counts <- lapply(chord_outs, getElement, "contexts")
+c.g.counts <- lapply(c.g.counts, subset.matrix, select = 17:32)
+c.g.counts <- sapply(c.g.counts, sum)
+
+c.t.counts <- lapply(chord_outs, getElement, "contexts")
+c.t.counts <- lapply(c.t.counts, subset.matrix, select = 33:48)
+c.t.counts <- sapply(c.t.counts, sum)
+
+t.a.counts <- lapply(chord_outs, getElement, "contexts")
+t.a.counts <- lapply(t.a.counts, subset.matrix, select = 49:64)
+t.a.counts <- sapply(t.a.counts, sum)
+
+t.c.counts <- lapply(chord_outs, getElement, "contexts")
+t.c.counts <- lapply(t.c.counts, subset.matrix, select = 65:80)
+t.c.counts <- sapply(t.c.counts, sum)
+
+t.g.counts <- lapply(chord_outs, getElement, "contexts")
+t.g.counts <- lapply(t.g.counts, subset.matrix, select = 81:96)
+t.g.counts <- sapply(t.g.counts, sum)
+
+sbs.counts <- lapply(chord_outs, getElement, "contexts")
+sbs.counts <- lapply(sbs.counts, subset.matrix, select = 1:96)
+sbs.counts <- sapply(sbs.counts, sum)
+```
+
+
+## Mutational signatures
+
+### Signature extraction
+Not sure how many signatures there are for each method. Sometimes signatures have letters (e.g. 7a, 7b) which makes it annoying to predefine them. Here we define a function to read in all signatures present in our data.
+```{r get_sigs }
+get_sigs <- function(sig_list){
+  sigs <- sort(unique(unlist(lapply(sig_list, getElement, "Signature"))))
+  sigs_numbered <- as.integer(stringr::str_extract(sigs, "[0-9]+"))
+  sigs <- sigs[order(sigs_numbered)]
+  sigs_out <- list()
+  for (i in seq_along(sig_list)){
+    sigs_out[[i]] <- integer(length(sigs))
+    for (j in seq_along(sigs)){
+      if (sigs[j] %in% sig_list[[i]]$Signature){
+        sigs_out[[i]][j] <- sig_list[[i]]$Contribution[sig_list[[i]]$Signature == sigs[j]]
+      } else {
+        sigs_out[[i]][j] <- 0
+      }
+    }
+    names(sigs_out[[i]]) <- sigs
+  }
+  sigs_out
+}
+```
+
+
+### COSMIC v2
+
+#### Simple log-transformation
+```{r}
+sbs_v2 <- do.call(rbind, get_sigs(cosmic_sbs_v2_outs))
+rownames(sbs_v2) <- paste0(ids, "_", sites)
+
+#make scale factors
+n.sigs <- rowSums(sbs_v2)
+scale.factors <- median(n.sigs) / n.sigs
+
+#Look at clock-like signatures (1 and 5)
+plot(sbs_v2[,"Sig1"], n.sigs)
+plot(sbs_v2[,"Sig1"] * scale.factors, n.sigs)
+
+plot(sbs_v2[,"Sig5"], n.sigs)
+plot(sbs_v2[,"Sig5"] * scale.factors, n.sigs)
+
+#look at indel counts too
+plot(del.mh.counts, n.sigs)
+plot(del.rep.counts, n.sigs)
+
+#consider pseudo-count of 1
+sbs_v2_log <- log2(sbs_v2 + 1)
+plot(colMeans(sbs_v2_log), colVars(sbs_v2_log))
+
+#consider bigger pseudo-count of 50
+sbs_v2_log <- log2(sbs_v2 + 50)
+plot(colMeans(sbs_v2_log), colVars(sbs_v2_log))
+
+#then centre and scale for display on heatmap
+sbs_v2_log_scaled <- scale(sbs_v2_log)
+#get ranks as alternative display. Could set ties.method to min or average
+sbs_v2_log_ranks <- t(colRanks(sbs_v2_log, ties.method = "min"))
+rownames(sbs_v2_log_ranks) <- rownames(sbs_v2)
+colnames(sbs_v2_log_ranks) <- colnames(sbs_v2)
+
+#get distances based on logFCs
+sample.dists <- dist(sbs_v2_log)
+sample.clusts <- hclust(sample.dists)
+
+#get sig-sig distances based on centred and scaled values
+sig.dists1 <- dist(t(sbs_v2_log_scaled))
+sig.clusts1 <- hclust(sig.dists1)
+
+#get sig-sig distances based on Kendall's Tau distance
+sig.dists2 <- as.dist(rankdist::DistanceMatrix(t(sbs_v2_log_ranks)))
+sig.clusts2 <- hclust(sig.dists2)
+
+#Set ranks to empirical quantiles to ease interpretability
+sbs_v2_log_ranks <- sbs_v2_log_ranks / length(sites)
+
+#Display centred and scaled values, signals clustered on centred and scaled values
+pheatmap::pheatmap(sbs_v2_log_scaled[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered on centred and scaled values
+pheatmap::pheatmap(sbs_v2_log_ranks[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Diplay centred and scaled values, signals clustered by cross-sample ranks
+pheatmap::pheatmap(sbs_v2_log_scaled[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered by cross-sample ranks
+pheatmap::pheatmap(sbs_v2_log_ranks[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+```
+
+#### Barplots
+```{r, fig.width=8,fig.height=6}
+plt_df <- sbs_v2
+plt_df <- plt_df / rowSums(plt_df)
+plt_df <- plt_df[,colMaxs(plt_df) > 0.05]
+plt_df <- cbind(plt_df, `Sig - other` = 1 - rowSums(plt_df))
+#Shouldn't re-normalise
+#plt_df <- plt_df / rowSums(plt_df)
+plt_df <- as.data.frame(plt_df)
+plt_df$id <- ids
+plt_df$site <- sites
+plt_df$sample <- paste(plt_df$id, plt_df$site, sep = "_")
+plt_df <- reshape2::melt(plt_df)
+colnames(plt_df) <- c("id", "site", "sample", "sig", "count")
+plt_df$pathology <- ifelse(grepl("CA0090|CA0046", plt_df$id), "NE", ifelse(grepl("CA0027|CA0058", plt_df$id), "Mixed", "AD"))
+g <- ggplot(plt_df, aes(x = sample, y = count, fill = sig)) + geom_col() +  theme_bw()+ facet_grid(.~pathology, scales = "free", space = "free") + scale_fill_manual(values = paletteer_d("ggsci::springfield_simpsons") %>% as.character()) + theme(axis.text.x = element_blank())
+print(g)
+```
+
+#### PCA
+```{r, fig.width=10, fig.height=8}
+pca.meta <- data.frame(
+  id = ids,
+  mut.burden = log10(rowSums(sbs_v2)),
+  age = rep(ages, times = table(ids)),
+  treat.time = rep(log2(treat.time), times = table(ids)),
+  psa = rep(log10(psa), times = table(ids)),
+  row.names = rownames(sbs_v2_log)
+)
+pca_out <- PCAtools::pca(t(sbs_v2_log), metadata = pca.meta)
+PCAtools::screeplot(pca_out)
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "id")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "mut.burden")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "age")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "treat.time")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "psa")
+
+#will centre the range of each PC then take the top and bottom 5% by default
+PCAtools::plotloadings(pca_out)
+#will take the top 5 loadings (or ntopLoadings) by absolute value for each of PC1 and PC2 then display the unique ones
+#lengthLoadingsArrowsFactor can stop loadings from being shown correctly if too long. See: https://github.com/kevinblighe/PCAtools/issues/52
+PCAtools::biplot(pca_out, showLoadings = T, colby = "id", lengthLoadingsArrowsFactor = 1, ntopLoadings = 6)
+```
+
+### COSMIC SBS v3.2
+
+#### Scale-factor-based log-transformation
+```{r, fig.height=7.5,fig.width=10.5}
+sbs_v3.2 <- do.call(rbind, get_sigs(cosmic_sbs_v3.2_outs))
+rownames(sbs_v3.2) <- paste0(ids, "_", sites)
+
+#make scale factors
+n.sigs <- rowSums(sbs_v3.2)
+scale.factors <- median(n.sigs) / n.sigs
+
+#Look at clock-like signatures (1 and 5)
+plot(sbs_v3.2[,"SBS1"], n.sigs)
+plot(sbs_v3.2[,"SBS1"] * scale.factors, n.sigs)
+
+plot(sbs_v3.2[,"SBS5"], n.sigs)
+plot(sbs_v3.2[,"SBS5"] * scale.factors, n.sigs)
+
+#look at indel counts too
+plot(del.mh.counts, n.sigs)
+plot(del.rep.counts, n.sigs)
+
+#consider pseudo-count of 1
+sbs_v3.2_log <- log2(sbs_v3.2 + 1)
+plot(colMeans(sbs_v3.2_log), colVars(sbs_v3.2_log))
+
+#consider bigger pseudo-count of 50
+sbs_v3.2_log <- log2(sbs_v3.2 + 50)
+plot(colMeans(sbs_v3.2_log), colVars(sbs_v3.2_log))
+
+#then centre and scale for display on heatmap
+sbs_v3.2_log_scaled <- scale(sbs_v3.2_log)
+#get ranks as alternative display. Could set ties.method to min or average
+sbs_v3.2_log_ranks <- t(colRanks(sbs_v3.2_log, ties.method = "min"))
+rownames(sbs_v3.2_log_ranks) <- rownames(sbs_v3.2)
+colnames(sbs_v3.2_log_ranks) <- colnames(sbs_v3.2)
+
+#get distances based on logFCs
+sample.dists <- dist(sbs_v3.2_log)
+sample.clusts <- hclust(sample.dists)
+
+#get sig-sig distances based on centred and scaled values
+sig.dists1 <- dist(t(sbs_v3.2_log_scaled))
+sig.clusts1 <- hclust(sig.dists1)
+
+#get sig-sig distances based on Kendall's Tau distance
+sig.dists2 <- as.dist(rankdist::DistanceMatrix(t(sbs_v3.2_log_ranks)))
+sig.clusts2 <- hclust(sig.dists2)
+
+#Set ranks to empirical quantiles to ease interpretability
+sbs_v3.2_log_ranks <- sbs_v3.2_log_ranks / length(sites)
+
+#Display centred and scaled values, signals clustered on centred and scaled values
+pheatmap::pheatmap(sbs_v3.2_log_scaled[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered on centred and scaled values
+pheatmap::pheatmap(sbs_v3.2_log_ranks[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Diplay centred and scaled values, signals clustered by cross-sample ranks
+pheatmap::pheatmap(sbs_v3.2_log_scaled[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered by cross-sample ranks
+pheatmap::pheatmap(sbs_v3.2_log_ranks[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+```
+
+### Barplots
+```{r, fig.width=8,fig.height=8}
+plt_df <- sbs_v3.2
+plt_df <- plt_df / rowSums(plt_df)
+plt_df <- plt_df[,colMaxs(plt_df) > 0.05]
+plt_df <- cbind(plt_df, `SBS - other` = 1 - rowSums(plt_df))
+#Shouldn't re-normalise
+#plt_df <- plt_df / rowSums(plt_df)
+plt_df <- as.data.frame(plt_df)
+plt_df$id <- ids
+plt_df$site <- sites
+plt_df$sample <- paste(plt_df$id, plt_df$site, sep = "_")
+plt_df <- reshape2::melt(plt_df)
+colnames(plt_df) <- c("id", "site", "sample", "sig", "count")
+plt_df$pathology <- ifelse(grepl("CA0090|CA0046", plt_df$id), "NE", ifelse(grepl("CA0027|CA0058", plt_df$id), "Mixed", "AD"))
+g <- ggplot(plt_df, aes(x = sample, y = count, fill = sig)) + geom_col() +  theme_bw()+ facet_grid(.~pathology, scales = "free", space = "free") + scale_fill_manual(values = c(paletteer_d("ggsci::springfield_simpsons") %>% as.character(), "lightgrey")) 
+print(g)
+```
+```{r fig.height=10, fig.width=7}
+library(patchwork)
+chord_df$sample <- paste(chord_df$id, chord_df$site, sep = "_") 
+chord_df%>% select(c("sample", "p_hrd"))
+df <- merge(plt_df, chord_df%>% select(c("sample", "p_hrd")), by = "sample")
+lesion <- df$site
+lesion[grep("brain", lesion)] <- "brain"
+lesion[grep("dura", lesion)] <- "dura"
+lesion[grep("prostate", lesion)] <- "prostate"
+lesion[grep("liver", lesion)] <- "liver"
+lesion[grep("fat", lesion)] <- "fat"
+lesion[grep("lymph|hilar", lesion)] <- "LN"
+lesion[grep("rib|vertebra", lesion)] <- "bone"
+lesion[grep("lung", lesion)] <- "lung"
+lesion[grep("abdomen", lesion)] <- "abdomen"
+lesion[grep("bladder", lesion)] <- "bladder"
+length(lesion)
+df$id <- gsub("00", "", df$id)
+
+f1 <- ggplot(df, aes(x = sample, y = p_hrd, fill = id)) + geom_col() + ylim(0,1) + geom_hline(yintercept = 0.5) + 
+  theme_bw()+ facet_grid(.~pathology+id, scales = "free", space = "free")+
+  theme(axis.text.x = element_blank(), legend.position = "none", axis.ticks.x = element_blank(),strip.background = element_rect(fill ="white"), axis.title.x = element_blank()) 
+f1
+g <- ggplot(df, aes(x = sample, y = count, fill = sig)) + geom_col() +  theme_bw()+ facet_grid(.~pathology+id, scales = "free", space = "free") + scale_fill_manual(values = c(paletteer_d("ggsci::springfield_simpsons") %>% as.character(), "lightgrey")) + theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90),   strip.background = element_blank(),
+  strip.text.x = element_blank())+
+  scale_x_discrete(breaks = df$sample, labels= lesion)
+g
+
+p <- f1/g + plot_layout(axes = "collect", guides = "collect", heights = c(1, 3))
+p
+png(paste0("~/CASCADEpaper/paper/Fig3/SBS/png/sbs.png"), height = 700, width = 500)
+p
+dev.off()
+saveRDS(p, "~/CASCADEpaper/paper/Fig3/SBS/plot_obj/sbs.Rds")
+
+```
+
+#### PCA
+```{r, fig.width=10, fig.height=8}
+pca.meta <- data.frame(
+  id = ids,
+  mut.burden = log10(rowSums(sbs_v3.2)),
+  age = rep(ages, times = table(ids)),
+  treat.time = rep(log2(treat.time), times = table(ids)),
+  psa = rep(log10(psa), times = table(ids)),
+  row.names = rownames(sbs_v3.2_log)
+)
+pca_out <- PCAtools::pca(t(sbs_v3.2_log), metadata = pca.meta)
+PCAtools::screeplot(pca_out)
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "id")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "mut.burden")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "age")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "treat.time")
+PCAtools::pairsplot(pca_out, components = 1:4, colby = "psa")
+
+#will centre the range of each PC then take the top and bottom 5% by default
+PCAtools::plotloadings(pca_out)
+#will take the top 5 loadings (or ntopLoadings) by absolute value for each of PC1 and PC2 then display the unique ones
+#lengthLoadingsArrowsFactor can stop loadings from being shown correctly if too long. See: https://github.com/kevinblighe/PCAtools/issues/52
+PCAtools::biplot(pca_out, showLoadings = T, colby = "id", lengthLoadingsArrowsFactor = 1, ntopLoadings = 6)
+```
+
+#### Boxplots
+```{r}
+for (sig in test_sigs){
+ boxplot(split(sbs_v3.2_log[, sig], ids), main = sig) 
+}
+```
+
+### COSMIC DBS v3.2
+
+#### Scale-factor-based log-transformation
+```{r}
+dbs_v3.2 <- do.call(rbind, get_sigs(cosmic_dbs_v3.2_outs))
+rownames(dbs_v3.2) <- paste0(ids, "_", sites)
+
+#make scale factors
+n.sigs <- rowSums(dbs_v3.2)
+scale.factors <- median(n.sigs) / n.sigs
+
+dbs_v3.2_log <- log2(scale.factors * dbs_v3.2 + 1)
+#filter out any signature which does not occur with at least a min proportion of counts in at least one sample
+dbs_v3.2_props <- dbs_v3.2 / rowSums(dbs_v3.2)
+max.props <- colMaxs(dbs_v3.2_props)
+dbs_v3.2_log <- dbs_v3.2_log[, max.props > 0.05]
+#then centre and scale for display on heatmap
+dbs_v3.2_log_scaled <- scale(dbs_v3.2_log)
+#get ranks as alternative display. Could set ties.method to min or average
+dbs_v3.2_log_ranks <- t(colRanks(dbs_v3.2_log, ties.method = "min"))
+rownames(dbs_v3.2_log_ranks) <- rownames(dbs_v3.2)
+colnames(dbs_v3.2_log_ranks) <- colnames(dbs_v3.2)[max.props > 0.05]
+
+#get distances based on logFCs
+sample.dists <- dist(dbs_v3.2_log)
+sample.clusts <- hclust(sample.dists)
+
+#get sig-sig distances based on centred and scaled values
+sig.dists1 <- dist(t(dbs_v3.2_log_scaled))
+sig.clusts1 <- hclust(sig.dists1)
+
+#get sig-sig distances based on Kendall's Tau distance
+sig.dists2 <- as.dist(rankdist::DistanceMatrix(t(dbs_v3.2_log_ranks)))
+sig.clusts2 <- hclust(sig.dists2)
+
+#Set ranks to empirical quantiles to ease interpretability
+dbs_v3.2_log_ranks <- dbs_v3.2_log_ranks / length(sites)
+
+#Display centred and scaled values, signals clustered on centred and scaled values
+pheatmap::pheatmap(dbs_v3.2_log_scaled[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered on centred and scaled values
+pheatmap::pheatmap(dbs_v3.2_log_ranks[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Diplay centred and scaled values, signals clustered by cross-sample ranks
+pheatmap::pheatmap(dbs_v3.2_log_scaled[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered by cross-sample ranks
+pheatmap::pheatmap(dbs_v3.2_log_ranks[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+```
+
+#### Barplots
+```{r, fig.width=8,fig.height=8}
+plt_df <- dbs_v3.2
+plt_df <- plt_df / rowSums(plt_df)
+plt_df <- plt_df[,colMaxs(plt_df) > 0.05]
+#Shouldn't re-normalise
+#plt_df <- plt_df / rowSums(plt_df)
+plt_df <- as.data.frame(plt_df)
+plt_df$id <- ids
+plt_df$site <- sites
+plt_df <- reshape2::melt(plt_df)
+colnames(plt_df) <- c("id", "site", "sig", "count")
+ggplot(plt_df, aes(x = site, y = count, fill = sig)) + geom_col() + theme(axis.text.x = element_text(angle = 90)) + facet_grid(.~id, scales = "free", space = "free")
+```
+
+#### PCA
+```{r, fig.width=10, fig.height=8}
+pca.meta <- data.frame(
+  id = ids,
+  mut.burden = log10(rowSums(dbs_v3.2)),
+  age = rep(ages, times = table(ids)),
+  treat.time = rep(log2(treat.time), times = table(ids)),
+  psa = rep(log10(psa), times = table(ids)),
+  row.names = rownames(dbs_v3.2_log)
+)
+pca_out <- PCAtools::pca(t(dbs_v3.2_log), metadata = pca.meta)
+PCAtools::screeplot(pca_out)
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "id")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "mut.burden")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "age")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "treat.time")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "psa")
+
+#will centre the range of each PC then take the top and bottom 5% by default
+PCAtools::plotloadings(pca_out)
+#will take the top 5 loadings (or ntopLoadings) by absolute value for each of PC1 and PC2 then display the unique ones
+#lengthLoadingsArrowsFactor can stop loadings from being shown correctly if too long. See: https://github.com/kevinblighe/PCAtools/issues/52
+PCAtools::biplot(pca_out, showLoadings = T, colby = "id", lengthLoadingsArrowsFactor = 1, ntopLoadings = 6)
+```
+
+#### Boxplots
+```{r}
+for (sig in colnames(dbs_v3.2_log)){
+ boxplot(split(dbs_v3.2_log[, sig], ids), main = sig)
+  plot(rep(treat.time, times = n.sites), dbs_v3.2_log[,sig])
+  plot(rep(ages, times = n.sites), dbs_v3.2_log[,sig])
+}
+```
+
+### COSMIC Indel v3.2
+
+#### Scale-factor-based log-transformation
+```{r}
+indel_v3.2 <- do.call(rbind, get_sigs(cosmic_indel_v3.2_outs))
+rownames(indel_v3.2) <- paste0(ids, "_", sites)
+
+#make scale factors
+n.sigs <- rowSums(indel_v3.2)
+scale.factors <- median(n.sigs) / n.sigs
+
+indel_v3.2_log <- log2(scale.factors * indel_v3.2 + 1)
+#filter out any signature which does not occur with at least a min proportion of counts in at least one sample
+indel_v3.2_props <- indel_v3.2 / rowSums(indel_v3.2)
+max.props <- colMaxs(indel_v3.2_props)
+indel_v3.2_log <- indel_v3.2_log[, max.props > 0.05]
+#then centre and scale for display on heatmap
+indel_v3.2_log_scaled <- scale(indel_v3.2_log)
+#get ranks as alternative display. Could set ties.method to min or average
+indel_v3.2_log_ranks <- t(colRanks(indel_v3.2_log, ties.method = "min"))
+rownames(indel_v3.2_log_ranks) <- rownames(indel_v3.2)
+colnames(indel_v3.2_log_ranks) <- colnames(indel_v3.2)[max.props > 0.05]
+
+#get distances based on logFCs
+sample.dists <- dist(indel_v3.2_log)
+sample.clusts <- hclust(sample.dists)
+
+#get sig-sig distances based on centred and scaled values
+sig.dists1 <- dist(t(indel_v3.2_log_scaled))
+sig.clusts1 <- hclust(sig.dists1)
+
+#get sig-sig distances based on Kendall's Tau distance
+sig.dists2 <- as.dist(rankdist::DistanceMatrix(t(indel_v3.2_log_ranks)))
+sig.clusts2 <- hclust(sig.dists2)
+
+#Set ranks to empirical quantiles to ease interpretability
+indel_v3.2_log_ranks <- indel_v3.2_log_ranks / length(sites)
+
+#Display centred and scaled values, signals clustered on centred and scaled values
+pheatmap::pheatmap(indel_v3.2_log_scaled[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered on centred and scaled values
+pheatmap::pheatmap(indel_v3.2_log_ranks[sample.clusts$order, sig.clusts1$order], cluster_rows = F, cluster_cols = F)
+
+#Diplay centred and scaled values, signals clustered by cross-sample ranks
+pheatmap::pheatmap(indel_v3.2_log_scaled[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+
+#Display cross-sample empirical quantiles, signals clustered by cross-sample ranks
+pheatmap::pheatmap(indel_v3.2_log_ranks[sample.clusts$order, sig.clusts2$order], cluster_rows = F, cluster_cols = F)
+```
+
+#### Barplots
+```{r, fig.width=8,fig.height=8}
+plt_df <- indel_v3.2
+plt_df <- plt_df / rowSums(plt_df)
+plt_df <- plt_df[,colMaxs(plt_df) > 0.05]
+plt_df <- cbind(plt_df, `ID - other` = 1 - rowSums(plt_df))
+#Shouldn't re-normalise
+#plt_df <- plt_df / rowSums(plt_df)
+plt_df <- as.data.frame(plt_df)
+plt_df$id <- ids
+plt_df$site <- sites
+plt_df <- reshape2::melt(plt_df)
+colnames(plt_df) <- c("id", "site", "sig", "count")
+ggplot(plt_df, aes(x = site, y = count, fill = sig)) + geom_col() + theme(axis.text.x = element_text(angle = 90)) + facet_grid(.~id, scales = "free", space = "free")
+```
+
+#### PCA
+```{r, fig.width=10, fig.height=8}
+pca.meta <- data.frame(
+  id = ids,
+  age = rep(ages, times = table(ids)),
+  mut.burden = log10(rowSums(indel_v3.2)),
+  treat.time = rep(log2(treat.time), times = table(ids)),
+  psa = rep(log10(psa), times = table(ids)),
+  row.names = rownames(indel_v3.2_log)
+)
+pca_out <- PCAtools::pca(t(indel_v3.2_log), metadata = pca.meta)
+PCAtools::screeplot(pca_out)
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "id")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "mut.burden")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "age")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "treat.time")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "psa")
+
+#will centre the range of each PC then take the top and bottom 5% by default
+PCAtools::plotloadings(pca_out)
+#will take the top 5 loadings (or ntopLoadings) by absolute value for each of PC1 and PC2 then display the unique ones
+#lengthLoadingsArrowsFactor can stop loadings from being shown correctly if too long. See: https://github.com/kevinblighe/PCAtools/issues/52
+PCAtools::biplot(pca_out, showLoadings = T, colby = "id", lengthLoadingsArrowsFactor = 1, ntopLoadings = 6)
+```
+
+#### Boxplots
+```{r}
+for (sig in colnames(indel_v3.2_log)){
+ boxplot(split(indel_v3.2_log[, sig], ids), main = sig) 
+}
+```
+
+### PCA - all features
+```{r, fig.width=10, fig.height=8}
+pca.meta <- data.frame(
+  id = ids,
+  age = rep(ages, times = table(ids)),
+  sbs.burden = log10(rowSums(sbs_v3.2)),
+  dbs.burden = log10(rowSums(dbs_v3.2)),
+  indel.burden = log10(rowSums(indel_v3.2)),
+  treat.time = rep(log2(treat.time), times = table(ids)),
+  psa = rep(log10(psa), times = table(ids)),
+  row.names = rownames(indel_v3.2_log)
+)
+pca_out <- PCAtools::pca(t(cbind(sbs_v3.2_log, dbs_v3.2_log, indel_v3.2_log)), metadata = pca.meta)
+PCAtools::screeplot(pca_out)
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "id")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "sbs.burden")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "dbs.burden")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "indel.burden")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "age")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "treat.time")
+PCAtools::pairsplot(pca_out, components = 1:3, colby = "psa")
+
+#will centre the range of each PC then take the top and bottom 5% by default
+PCAtools::plotloadings(pca_out)
+#will take the top 5 loadings (or ntopLoadings) by absolute value for each of PC1 and PC2 then display the unique ones
+#lengthLoadingsArrowsFactor can stop loadings from being shown correctly if too long. See: https://github.com/kevinblighe/PCAtools/issues/52
+PCAtools::biplot(pca_out, showLoadings = T, colby = "id", lengthLoadingsArrowsFactor = 1, ntopLoadings = 7)
+```
+
+
+Notables signatures
+
+SBS 3.2:
+HRD:
+SBS3, SBS8 - high in CA0090
+
+MSI
+SBS6: MSI - high in CA0083 lung, perinephric, CA0058
+SBS15: MSI - high in CA0083, liver, hilar, paraoartic, CA0058
+SBS20: MSI - high in CA0058, CA0090
+SBS21: MSI - high in CA0058
+SBS26: not present
+SBS44: MSI - not high in any in particular
+
+BER
+SBS18: ROS or BER deficiency due to MUTYH - high in CA0058
+
+Drugs
+SBS17b/SBS28: Possibly ROS or fluorouracil - high in CA0043
+SBS31, SBS35: Platinum - high in CA0090, relatively high SBS31 in CA0043
+SBS32: Azathioprine (immunosuppressant) - high in CA0035, CA0083 liver, paraaortic, hilar
+SBS87: Thiopurine (immunosuppresant) - high in CA0083 liver, paraaortic, hilar
+
+DBS:
+DBS2: tobacco-smoking - high in CA0090 (prop)
+DBS5: Platinum - high in CA0043, CA0090 (prop)
+DBS7, DBS10: MSI - not distinctively high in any patient (prop). Neither CA0058 or or CA0083 are high.
+
+Indels:
+ID6, ID8: HRD signature attribed to NHEJ - high in CA0090 (prop)
+ID1, ID2: Usually age, but boosted by MSI - high in CA0058 (prop)
+ID17: Linked with TOP2A mutation - high in CA0083 lung/perinephric (prop)
+ID3: Tobacco-smoking - high in CA0083 lung/perinephric (prop)

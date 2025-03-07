@@ -1,0 +1,474 @@
+---
+title: "Subset noraml cells marker"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r include=FALSE}
+library(Seurat)
+library(harmony)
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+library(tidyverse)
+setwd("~/CASCADEpaper/paper/Fig6/subset_normal_cell")
+normal2 <- readRDS("~/CASCADEpaper/paper/Fig6/normal_finalv2_srt.Rds")
+changename <- function(normal2){
+cellnames <- gsub("^_", "", colnames(normal2))
+cellnames <- paste(normal2$sample, cellnames, sep = "_")
+cellnames <- gsub("[_1]+$", "", cellnames)
+cellnames <- gsub("[_2]+$", "", cellnames)
+cellnames <- gsub("-1$", "", cellnames)
+cellnames <- gsub("-", "", cellnames)
+cellnames <- gsub("1$", "", cellnames)
+cellnames <- paste0(cellnames, "-1")
+return(RenameCells(normal2, new.names = cellnames))
+}
+
+normal2 <- changename(normal2)
+
+fplot <- function(srt,features, title = NULL){
+  features <- features[features %in% rownames(srt)]
+  fs <- split(features, ceiling(seq_along(features)/6))
+  lapply(fs, function(x) FeaturePlot(srt, features = x) + plot_annotation(title = title) + plot_layout(nrow = 2, ncol = 3))
+}
+
+```
+
+```{r marker}
+Epithelial_cell <- c("WFDC2","EPCAM", "SLPI", "EHF", "TMC5")#"CXADR", developing neuron system
+
+Hepatocytes_feature <- c("APOC3", "APOA2", "ALB", "SAA1", "ORM1", "HP")
+Hepatocytes_feature <- c(Hepatocytes_feature, "TF", "CYP3A4", "CYP2E1")#, "ASS1", "APOE")
+
+Neuron_feature <- c( "GPC5", "NRXN1", "PCDH9", #astrocyte #G6PAM endothelial marker
+                    "RBFOX1", "CADM2", "CSMD1", "KCNIP4")#, #exitatory neu
+                    #"NRXN3", "CNTNAP2", "ROBO2") # inhibitory neu
+
+Fibroblast_feature <- c("PDGFRA", "VIM", "COL4A1", "FN1", "COL1A1", "COL1A2", "COL5A1",  "LUM", "FBLN1") # VCAN
+smooth_muscle <- c("TAGLN", "MYH11","ACTA2","CNN1", "DES", "PRUNE2")
+
+pericyte_feature <- c("RGS5", "GJC1", "ADCY3",toupper(c("Higd1b", "Cox4i2", "Notch3", "pdgfrb", "mcam", "Cspg4", "Kcnj8","Abcc9", "Vtn ")))# ADCY3, neuronal primary cilia and obesity
+Chondrocyte_feature <- c("IBSP", "SP7", "IFITM5", "SATB2", "INSC")
+
+
+Endothelial_feature <- c("RAMP2","VWF", "ST6GALNAC3", "NOTCH1", "FLT1")
+
+
+Erythroid_marker <- c("HBA2", "HBA1","HBB", "ANK1")
+Macrophage_feature <- c("C1QA","C1QC","LYZ", "CD86", "CD68","CD74", "CD14", "FCGR3A","FCGR2B")
+focused_B_cell_feature <- c("CD19","MS4A1","BANK1", "TNFRSF13C")
+plasma_feature <- c("CD38","MZB1","PDK1","IGHG1")
+T_cell_feature <- c("CD3G", "CD3E", "CD3D", "CD2", "CD7") 
+
+
+all_marker <- list(Hepatocytes_feature, Neuron_feature,Epithelial_cell, Fibroblast_feature,smooth_muscle, pericyte_feature,Chondrocyte_feature,  Endothelial_feature, 
+                   Macrophage_feature, plasma_feature, focused_B_cell_feature, 
+                   T_cell_feature, Erythroid_marker)
+names(all_marker) <- c("Hepatocyte", "Neuron", "Epithelial", "Fibroblast","Smooth muscle", "Pericyte","Chondrocyte",   "Endothelial", "Macrophage", "Plasma cell","B cell", "T cell", "Erythroblst")
+```
+```{r Yangyi marker}
+# markers
+Macrophage_feature <- c("C1QA","C1QC","LYZ","FCER1A","EREG","CD68","CD14","FCGR3A", "DHRS9", "CD80",
+                        "CD86", "MS4A1", "CD19")## pro-inflammatory
+M1_feature <- c("IL23A", "TNF", "CXCL9", "CXCL10", "CXCL11", "CD86", "IL1A", "IL1B", "IL6", "CCL5",
+                "IRF5", "IRF1", "CD40", "IDO1", "KYNU", "CCR7", "CXCL3", "PTGS2", "CD14")
+## anti-inflammatory
+M2_feature <- c("IL4R", "CCL4", "CCL13","CCL20","CCL17","CCL18","CCL22","CCL24","LYVE1","VEGFA","VEGFB",
+                "VEGFC","VEGFD","EGF","CTSA","CTSB","CTSC","CTSD","TGFB1","TGFB2","TGFB3","MMP14",
+                "MMP19", "MMP9", "CLEC7A", "WNT7B", "FASLG", "TNFSF12", "TNFSF8", "CD276", "VTCN1", "MSR1", "FN1", "IRF4",
+                "ARG1", "FLT1")
+phagocytosis_feature <- c("MRC1", "CD163","MERTK","C1QB")
+angiogenesis_feature <- c("CCND2","CCNE1","CD44","CXCR4","E2F3","EDN1","EZH2","FGF18","FGFR1","FYN",
+                          "HEY1","ITGAV","JAG1","JAG2","MMP9","NOTCH1","PDGFA","PTK2","SPP1","STC1",
+                          "TNFAIP6","TYMP","VAV2","VCAN","VEGFA")
+TAM_feature <- c("FCN1", "C1QC", "SPP1")
+Monocyte_feature <- c("S100A9","S100A8","LYZ", "KCNMA1", "PLXDC2", "SAT1", "LRMDA", "RBM47", "CD14")  ## CD14
+
+focused_Macrophage_feature <- unique(c("CD86","C1QA","C1QB","C1QC",
+                                       "IRF1","KYNU","CD14",
+                                       "CTSB","CTSC","CTSD","MSR1","MRC1","CD274","CD163",
+                                       "SPP1","EZH2","CD68","MERTK",
+                                       "CD44","CXCR4","E2F3","EZH2","ITGAV","SPP1","TYMP","VCAN","VEGFA"))
+focused_M1_M2_feature <- c("IRF1","KYNU","CD14",
+                           "CTSB","CTSC","CTSD","MSR1","MRC1","CD274","CD163")
+focused_phago_angio_feature <- c("MRC1", "CD163","MERTK","C1QB",
+                                 "CD44","CXCR4","E2F3","EZH2","ITGAV","SPP1","TYMP","VCAN","VEGFA")
+
+NK_feature <- c("KLRB1","KLRG1","XCL2","XCL1","NCR1","KLRD1","NKG7","FGFBP2","GZMB", "NCAM1")
+Fibroblast_feature <- c("DCN","LUM")
+Endothelial_feature <- c("RAMP2","VWF")
+Epithelial_feature <- c("XBP1","EPCAM","PCA3","KLK3","KRT18","KRT8")
+Mast_feature <- c("TPSAB1","CPA3")
+pDC_feature <- c("IRF7","IRF4", "CD80", "CD86")
+mDC_feature <- c("LYZ","FCER1A","CD1C", "CD80", "CD86")
+
+Treg_feature <- c("CTLA4","IL2RA","FOXP3","CD3D","CD4","CCR7","SELL")
+Th17_feature <- c("KLRB1","IL7R","RORC","IL17A","IL17F","CD3D","CD4")
+Th1_feature <- c("IL7R","IL2","TNF","CD4")
+Naive_Th_feature <- c("IL7R","CCR7","SELL")
+CTL_feature <- c("IL7R","IL2","TNF","IFNG","XCL2","XCL1","GZMB","CD8B","CD8A", "CD3G", "CD247","CD3D","CD3E", "FOXP3", "PTPRC")
+CD8_effector_feature <- c("GZMB","CD8B","CD8A", "CD3E", "CD8", "FOXP3","CD3G", "CD247", "PTPRC")
+# CD4 T: 'IL17A','IL17F', are removed since no cell expresses it
+CD4_T_cell_feature <- c('KLRB1', 'IL7R', 'SELL', 'IL2', 'CTLA4', "CD3G", "CD247",'CD3D', 'CD3E', 'CD4', 'RORC', 'TNF', 'FOXP3', 'IL2RA', 'CCR7', 'PTPRC', 'CD8A')
+CD8_T_cell_feature <- unique(CTL_feature, CD8_effector_feature)
+
+functional_T_cell_feature <- c("CD247","IL7R", "SELL","FOXP3","IL2RA", "TIGIT", "PDCD1","CTLA4","PRF1","GZMA")
+focused_naive_T_cell_feature <- c("CD247","IL7R", "SELL")
+focused_eff_reg_exh_T_cell_feature <- c("PRF1","GZMA","FOXP3","IL2RA", "TIGIT", "PDCD1","CTLA4")
+main_T_cell_feature <- c('CD3D', 'CD3E', "CD3G", 'CD4', "CD8A","CD8B")
+focused_T_cell_feature <- unique(c( main_T_cell_feature, focused_eff_reg_exh_T_cell_feature,functional_T_cell_feature))
+
+Plasma_cell_feature <- c("MZB1","XBP1","CD79B", "FCGR3A", "FCGR2A", "FCGRT", "FCGR1A", "FCGR3B", "FCGR2B", "CD40LG")
+# "MS4A1"=CD20, "CD40LG" = IgM, "MME"=CD10, "FCER2"=CD23, "CR2"=CD21
+B_cell_feature <- c("MZB1","XBP1","CD79B", "FCGR3A", "FCGR2A", "FCGRT", "FCGR1A", "FCGR3B", "FCGR2B", "CD40LG","FCGR3A", "FCGR2A", "FCGRT", "FCGR1A", "FCGR3B", "FCGR2B", "CD40LG",
+                    "MS4A1","CD79B","CD79A","BANK1","GPR183","TCL1A", "CD19", "CD27", "CD80", "CD86","CR2","MME","DNTT","ALKBH3",
+                    "DNTT","MME","CD19","MS4A1","CD22","HLA-DRA","CD24","CD40LG","CR2","FCRL2","FCER2","SDC1","CD80","CD84","CD86",
+                    "FAS","IL10","CXCL13","IL1A","IL1B","CD1D","IL2RA","BSG","HAVCR1","CD5","CD27","CTLA4","PDCD1","TNFRSF13C","TNFRSF17","TAC1")
+B_development_feature <- c("DNTT","MME","CD19","MS4A1","CD22","HLA-DRA","CD24","CD40LG","CR2","FCRL2","FCER2","SDC1","CD80","CD84","CD86",
+                           "FAS","IL10","CXCL13","IL1A","IL1B","CD1D","IL2RA","BSG","HAVCR1","CD5","CD27","CTLA4","PDCD1","TNFRSF13C")
+focused_B_cell_feature <- c("MZB1","XBP1","CD38","SDC1","BSG",
+                            "CD44","MS4A1","CD19","FCGR2B","BANK1","HLA-DRA","CD79B","CD79A",
+                            "CD86","TNFRSF13C",
+                            "CD22","CD24",
+                            "FCRL2","IL2RA","CD27")
+focused_plasma_cell_feature <- c("MZB1","XBP1","CD38","SDC1","BSG")
+focused_activated_B_feature <- c("CD44","MS4A1","CD19","FCGR2B","BANK1","HLA-DRA","CD79B","CD79A","CD86","TNFRSF13C")
+focused_naive_memory_B_feature <- c("CD22","CD24","FCRL2","IL2RA","CD27")
+
+all_feature <- unique(c(Macrophage_feature, Monocyte_feature, CD4_T_cell_feature, CD8_T_cell_feature,
+                        NK_feature, Fibroblast_feature, Plasma_cell_feature, B_cell_feature, Endothelial_feature,
+                        Epithelial_feature, Mast_feature, pDC_feature, mDC_feature))
+```
+
+
+```{r harmony on RNA, include=FALSE}
+harmony_rna <- function(endo, res = 0.5){
+
+DefaultAssay(endo) <- "RNA"
+endo <- NormalizeData(endo)
+endo <- ScaleData(endo)
+
+endo <- FindVariableFeatures(endo, selection.method = "vst", nfeatures = 2000)
+endo <- RunPCA(endo, features = VariableFeatures(object = endo))
+endo <- RunHarmony(endo, "patient", assay.use = "RNA")
+endo <- endo %>% 
+  RunUMAP(reduction = "harmony", dims = 1:20) %>% 
+  FindNeighbors(reduction = "harmony", dims = 1:20) %>% 
+  FindClusters(resolution = res) %>% 
+  identity()
+
+p <- DimPlot(endo, label = T) + DimPlot(endo, label = T, group.by = "patient")
+print(p)
+return(endo)
+
+}
+```
+
+### enrichment function
+```{r enrichment function, message=FALSE, warning=FALSE, include=FALSE}
+
+library(gridExtra)
+library(DOSE)
+library(msigdbr)
+library(clusterProfiler)
+library(enrichplot)
+library(ggnewscale)
+library(dorothea)
+library(dplyr)
+library(tibble)
+library(data.table)
+Hall <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, gene_symbol)
+KEGG <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "KEGG")%>%
+  dplyr::select(gs_name, gene_symbol)
+Reactome <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "REACTOME")%>%
+  dplyr::select(gs_name, gene_symbol)
+
+C5 <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+  dplyr::select(gs_name, gene_symbol)
+C6 <- msigdbr(species = "Homo sapiens", category = "C6") %>%
+  dplyr::select(gs_name, gene_symbol)
+C7 <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, gene_symbol)
+all <- rbind(Hall, KEGG, Reactome,C5,C6)
+
+C8 <- msigdbr(species = "Homo sapiens", category = "C8") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+
+enrichment_plots <- function(geneList, geneSets, upregulatetitle, downregulatetitle){
+  em2 <- GSEA(geneList, TERM2GENE = geneSets)
+  em2_up <- em2
+  em2_up@result <- em2_up@result[em2_up@result$NES > 0,]
+  if(nrow(em2_up@result)>0){
+    d <- dotplot(em2_up, showCategory=30) + ggtitle(upregulatetitle)
+    print(d)
+  }else { print("No upregulated result")}
+  
+  em2_down <- em2
+  em2_down@result <- em2_down@result[em2_down@result$NES < 0,]
+  if(nrow(em2_down@result)>0){
+    d <- dotplot(em2_down, showCategory=30) + ggtitle(downregulatetitle)
+    print(d)}else{ print("No downregulated result")}
+  return(em2)
+}
+
+enrichment_barplots <- function(geneList, geneSets, groupname){
+  enresult <- GSEA(geneList, TERM2GENE = geneSets)
+  if(nrow(enresult@result)>0){
+  y <- arrange(enresult, abs(NES)) %>% 
+          group_by(sign(NES)) %>% 
+          mutate(Description = gsub("_", " ", Description)) %>%
+          mutate(Description = str_wrap(Description, width = 30)) %>% 
+          slice(1:5)
+  f <- ggplot(y, aes(NES, fct_reorder(Description, NES), fill=p.adjust), showCategory=10) + 
+    geom_col(orientation='y') + 
+    scale_fill_continuous(low='red', high='blue', guide=guide_colorbar(reverse=TRUE)) + 
+    theme_minimal() + ylab(NULL) + ggtitle(groupname)
+  print(f)}
+}
+
+generate_genelist <- function(markerdf){
+  temp <- setNames(markerdf$avg_log2FC, markerdf$gene)
+  temp <- sort(temp, decreasing = T)
+  return(temp)
+}
+```
+
+
+```{r}
+normal2$cell_id2[normal2$cell_id2 == "Myofibroblast"] <- "Smooth muscle"
+normal2$cell_id2[normal2$cell_id2 == "Lipofibroblast"] <- "Pericyte"
+Idents(normal2) <- normal2$seurat_clusters
+
+for (i in names(all_marker)){
+  f <- fplot(normal2, all_marker[[i]],title = i)
+  print(f)
+}
+```
+```{r}
+DimPlot(normal2, group.by = "seurat_clusters", label = T, repel = T)
+DimPlot(normal2, group.by = "cell_id2", label = T, repel = T) + ggtitle("normal cell types")
+DimPlot(normal2, group.by = "cell_anno", label = T, repel = T) +NoLegend()+ ggtitle("normal cell types subtypes")
+```
+
+
+```{r fig.height=6, fig.width=22}
+
+DotPlot(normal2, features = all_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(normal2, features = all_marker, group.by = "cell_id2")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+## B cell
+```{r eval=FALSE, include=FALSE}
+Bcell <- readRDS("~/CASCADEpaper/paper/Fig6/subset_normal_cell/Bcell.Rds")
+Bcell <- changename(Bcell)
+DimPlot(Bcell, label = T, group.by = "seurat_clusters")
+tcells <-  subset(Bcell, cells = WhichCells(Bcell, idents = "Progenitor B cell"))
+rmcells <- colnames(Bcell) %>% .[!.%in% WhichCells(normal2, idents = c(0,3,9,15,21))]
+
+Bcell <- subset(Bcell, cells = colnames(Bcell)[!colnames(Bcell) %in% c(colnames(tcells), rmcells)])
+Bcell <- harmony_rna(Bcell)
+
+```
+
+https://www.abcam.com/primary-antibodies/b-cells-basic-immunophenotyping
+
+https://www.nature.com/articles/s41467-021-27232-5/figures/1
+
+```{r fig.height=6, fig.width=9, message=FALSE, warning=FALSE}
+Bcell <- readRDS("~/CASCADEpaper/paper/Fig6/subset_normal_cell/Bcell_new.Rds")
+DimPlot(Bcell, label = T)
+fplot(Bcell, c("CD44", "MS4A1", "CD19", "FCGR2B", "BANK1", "HLA-DRA", "CD79B", "CD79A", "CD86", "TNFRSF13C","CD24", "FCRL2")
+, "general B cell")
+fplot(Bcell, plasma_feature, "plasma")
+fplot(Bcell, focused_naive_memory_B_feature, "memory B cell")
+Idents(Bcell) <- Bcell$seurat_clusters
+Bcellmarker <- FindAllMarkers(Bcell, logfc.threshold = 1.25)
+# genelists <- lapply(split(Bcellmarker, Bcellmarker$cluster), generate_genelist)
+# en <- mapply(enrichment_barplots, genelists, list(C8), as.list(names(genelists)))
+#saveRDS(Bcellmarker, "Bcellmarker.Rds")
+```
+```{r fig.height=6, fig.width=9}
+DimPlot(Bcell, label = T)
+fplot(Bcell, arrange(Bcellmarker, desc(avg_log2FC)) %>%filter(avg_log2FC > 0) %>% group_by(cluster) %>% slice(1:3) %>% pull(gene)
+)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+Bcell$cell_anno <- "B cell/memory B"
+Bcell$cell_anno[Bcell$seurat_clusters == "2"] <- "Plasma cell"
+Idents(Bcell) <- Bcell$cell_anno
+
+saveRDS(Bcell, "Bcell_new.Rds")
+```
+
+## T cell
+```{r eval=FALSE, include=FALSE}
+Tcell <- readRDS("Tcell.Rds")
+Tcell <- changename(Tcell)
+Tcell <- merge(Tcell, tcells)
+
+rmcells <- colnames(Tcell) %>% .[!.%in% WhichCells(normal2, idents = c(0,3,9,15,21))]
+Tcell <- subset(Tcell, cells = colnames(Tcell)[!colnames(Tcell) %in% rmcells])
+Tcell <- harmony_rna(Tcell)
+
+Tcell <- subset(Tcell, cells = colnames(Tcell)[!colnames(Tcell) %in% rmcells])
+Tcell <- harmony_rna(Tcell)
+bcells <- subset(Tcell, cells = WhichCells(Tcell , idents = 10))
+Tcell <- subset(Tcell, cells = WhichCells(Tcell , idents = 10, invert = T))
+Tcell <- harmony_rna(Tcell)
+
+DimPlot(Tcell, group.by = "cell_anno", label = T)
+```
+
+
+https://www.nature.com/articles/s41467-019-12464-3
+```{r fig.height=6, fig.width=9}
+Tcell <- readRDS("~/CASCADEpaper/paper/Fig6/subset_normal_cell/Tcell_new.Rds")
+DimPlot(Tcell, label = T)
+fplot(Tcell, c("CD3G", "CD3E", "CD3D", "CD2", "CD7"), "general T cell")
+
+fplot(Tcell, c("CTLA4" ,"IL2RA", "FOXP3", "RTKN2","IKZF2"), "Treg") #https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3077798/
+fplot(Tcell, c("CD8A", "CD8B", "CCL5", "GZMK"), "effector T cell")
+fplot(Tcell, c( "IL2", "TNF", "IL4R", "CD4"), "T helper cell")
+fplot(Tcell, c("PCDH9", "KIT", "AHR"), "innate lymphnoid cell") #https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9395525/
+fplot(Tcell, c( "GZMB","NCAM1", "GNLY","NKG7", "EFHD2", "CXCR3"), "NK cell")#https://www.nature.com/articles/s41423-020-00574-8
+fplot(Tcell, c("GZMK","LYAR","TNFAIP3", "CXCR4", "CREM", "CD69"), " resident memory T")
+
+fplot(Tcell, c( "SELL", "TCF7", "LEF1", "CCR7", "IL7R"), "Naive T cell") #https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2754146/ 
+# fplot(Tcell, c("GZMB", "GNLY", "NKG7", "EFHD2", "CXCR3"), "cytotoxic T cell")
+
+# VlnPlot(Tcell, features = c("CD4", "CD8A", "CD8B","GZMB", "GNLY", "NKG7", "EFHD2", "CXCR3" ,"SELL", "TCF7", "CCR7", "IL7R"))
+# DotPlot(Tcell, features = c("CTLA4" ,"IL2RA", "FOXP3", "RTKN2","IKZF2","CD4", "CD8A", "CD8B","PCDH9", "KIT", "AHR", "GZMB","NCAM1", "GNLY","GZMK","LYAR","TNFAIP3", "CXCR4", "CREM", "CD69", "SELL", "TCF7", "LEF1", "CCR7", "IL7R"))+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+```{r}
+Idents(Tcell) <- Tcell$seurat_clusters
+Tcellmarker <- FindAllMarkers(Tcell, logfc.threshold = 1.25)
+# genelists <- lapply(split(Tcellmarker, Tcellmarker$cluster), generate_genelist)
+# en <- mapply(enrichment_barplots, genelists, list(C8), as.list(names(genelists)))
+fplot(Tcell, arrange(Tcellmarker, desc(avg_log2FC)) %>%filter(avg_log2FC > 0) %>% group_by(cluster) %>% slice(1:3) %>% pull(gene)
+)
+
+```
+```{r eval=FALSE, include=FALSE}
+Tcell$cell_anno <- "T effector cell"
+Tcell$cell_anno[Tcell$seurat_clusters %in% c("0", "4")] <- "resident memory T cell"
+Tcell$cell_anno[Tcell$seurat_clusters %in% c("6")] <- "NK cell"
+Tcell$cell_anno[Tcell$seurat_clusters %in% c("5")] <- "Treg"
+Tcell$cell_anno[Tcell$seurat_clusters %in% c("2")] <- "Naive T cell"
+Tcell$cell_anno[Tcell$seurat_clusters %in% c("3")] <- "T helper cell"
+Tcell$cell_anno[Tcell$seurat_clusters %in% c("8")] <- "innate lymphnoid cell"
+
+Idents(Tcell) <- Tcell$cell_anno
+DimPlot(Tcell, label = T)
+saveRDS(Tcell, "Tcell_new.Rds")
+```
+
+
+## macrophage
+```{r echo=FALSE}
+macrophage <- readRDS("macrophage.Rds")
+macrophage <- changename(macrophage)
+rmcells <- colnames(macrophage) %>% .[!.%in% WhichCells(normal2, idents = c(4, 5, 6))]
+macrophage <- subset(macrophage, cells = colnames(macrophage)[!colnames(macrophage) %in%  rmcells])
+
+macrophage <- harmony_rna(macrophage)
+DimPlot(macrophage, group.by = "cell_anno", label = T)
+```
+
+
+```{r fig.height=6, fig.width=9}
+#macrophage <- readRDS("~/CASCADEpaper/paper/Fig6/subset_normal_cell/macrophage_new.Rds")
+#DimPlot(macrophage, label = T)
+fplot(macrophage, Macrophage_feature)
+#https://www.biocompare.com/Editorial-Articles/566347-A-Guide-to-Macrophage-Markers/
+fplot(macrophage, c("IL1A", "IL1B", "IL6", "NOS2", "TLR2", "TLR4", "CD80", "and CD86")
+, "M1")
+fplot(macrophage, c("CD115", "CD206", "PPARG", "ARG1", "CD163", "CD301")
+, "M2")
+
+fplot(macrophage, phagocytosis_feature, "phgocytosis")
+fplot(macrophage, angiogenesis_feature, "angiogenesis")
+fplot(macrophage, TAM_feature, "TAM")
+fplot(macrophage, c("SPP1", "RNASE1", "MT1G", "SEPP1", "FOLR2", "NUPR1", "KLHDC8B", "CCL18", "MMP12","APOC2" ), "TAM2") 
+# fplot(macrophage, Mast_feature, "mast cell")
+# fplot(macrophage, mDC_feature,"DC")
+
+fplot(macrophage, c("FCN1", "LYZ", "VCAN"), "monocyte") # monocytes
+
+```
+```{r fig.height=6, fig.width=9}
+Idents(macrophage) <- macrophage$seurat_clusters
+macromarker <- FindAllMarkers(macrophage, logfc.threshold = 1.25)
+# genelists <- lapply(split(Tcellmarker, Tcellmarker$cluster), generate_genelist)
+# en <- mapply(enrichment_barplots, genelists, list(C8), as.list(names(genelists)))
+fplot(macrophage, arrange(macromarker, desc(avg_log2FC)) %>%filter(avg_log2FC > 0) %>% group_by(cluster) %>% slice(1:6) %>% pull(gene)
+)
+```
+```{r echo=FALSE}
+fplot(macrophage,c("GINS3", "PRMT2", "MERTK", "WWP2", "NEK6", "NACC1", "NR1H3", "ATP2A2", "TM4SF19")
+)
+```
+
+```{r eval=FALSE, include=FALSE}
+macrophage$cell_anno <- "M0"
+macrophage$cell_anno[macrophage$seurat_clusters %in% c("0", "4")] <- "resident memory T cell"
+macrophage$cell_anno[macrophage$seurat_clusters %in% c("6")] <- "NK cell"
+macrophage$cell_anno[macrophage$seurat_clusters %in% c("5")] <- "Treg"
+macrophage$cell_anno[macrophage$seurat_clusters %in% c("2")] <- "Naive T cell"
+macrophage$cell_anno[macrophage$seurat_clusters %in% c("3")] <- "T helper cell"
+macrophage$cell_anno[macrophage$seurat_clusters %in% c("8")] <- "innate lymphnoid cell"
+
+Idents(macrophage) <- macrophage$cell_anno
+DimPlot(macrophage, label = T)
+saveRDS(macrophage, "macrophage_new.Rds")
+```
+
+
+## Fibroblast like cells
+```{r}
+fibro <- readRDS("~/CASCADEpaper/paper/Fig6/subset_normal_cell/Fibroblast.Rds")
+
+DimPlot(fibro, label = T) + ggtitle("Fibroblast like cell")
+DimPlot(fibro, label = T, group.by = "seurat_clusters") + ggtitle("Fibroblast like cell")
+```
+
+https://www.nature.com/articles/s41467-020-17740-1
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5908225/
+
+PDGFRA is common marker for fibroblast and subtypes and missed from mural cells and adipocytes
+
+skeleton muscle:
+https://pubmed.ncbi.nlm.nih.gov/32858949/#:~:text=Insulin%2Dlike%20growth%20factor%2D1,PI3K%2FAkt%2FGSK3%CE%B2%20pathways.
+https://www.nature.com/articles/s41598-017-00099-7
+
+senescent :/ injury response 
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6850482/
+https://pubmed.ncbi.nlm.nih.gov/36571249/
+
+
+```{r}
+fplot(fibro, c( "PDGFRA", "VIM", "COL4A1", "FN1", "COL1A1", "COL1A2", "COL5A1",  "LUM", "FBLN1" ), "common fibroblast")
+
+fplot(fibro, smooth_muscle, "mural cell/smooth muscle")
+fplot(fibro, Chondrocyte_feature, "chondrocyte")
+fplot(fibro, pericyte_feature, "Pericyte")
+fplot(fibro,c("MMP11", "POSTN", "CTHRC1", "COL1A1", "ACTA2", "COL3A1", "FAP"), "myofibroblast" ) #https://www.nature.com/articles/s41467-023-35832-6
+
+fplot(fibro, c("CFD", "APOD","C3", "IGF1"), "senescent fibroblast")
+
+# fibro$cell_anno <- "Fibroblast"
+# fibro$cell_anno[fibro$seurat_clusters == "1"] <- "Senescent fibroblast"
+# fibro$cell_anno[fibro$seurat_clusters %in% c("0")] <- "CAFs"
+# fibro$cell_anno[fibro$seurat_clusters== "9"] <- "Skeletal muscle"
+# fibro$cell_anno[fibro$seurat_clusters== "4"] <- "Chondrocyte"
+# fibro$cell_anno[fibro$seurat_clusters== "6"] <- "Smooth muscle"
+# fibro$cell_anno[fibro$seurat_clusters== "3"] <- "Adipocyte"
+
+```
+
