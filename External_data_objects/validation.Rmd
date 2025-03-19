@@ -27,7 +27,7 @@ names(clean_module) <- c("AR","Inflammation", "NE1","NE2", "Cycling","Glycolysis
 color_high <- setNames( c("dodgerblue3", brewer.dark2(6)[2:6]),names(clean_module))
 ```
 
-```{r compare_exp}
+```{r compare_exp, include=FALSE}
 compare_exp <- function(lcpm, gene, group){
   ind <- split(colnames(lcpm), group)
   df <- lapply(ind, function(x){
@@ -94,10 +94,10 @@ saveRDS(lcpm, "GSE126078/lcpm.Rds")
 df <- compare_exp(lcpm, group = x$samples$group, gene = clean_module)
 df
 g1 <- ggplot(df, aes(x = group, y = exp, fill = group))+ 
-  geom_violin(aes( color = group))+ geom_boxplot(width=0.1, outlier.size = 2) + theme_classic(base_size = 18) + 
+  geom_violin(aes( color = group))+ geom_boxplot(width=0.1, outlier.size = 2) + theme_bw(base_size = 18) + 
   facet_wrap(.~gene, nrow = 1)+ 
   scale_fill_jama()+scale_color_jama()+
-  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())+
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), strip.background = element_rect(fill = "white"))+
   theme(legend.position = "bottom", text = element_text(size = 16), legend.title.position = "top",
         plot.margin = margin(t = 0, l = 0, r = 0, b = 0, "cm"), panel.spacing = unit(0.1, "pt"), 
         legend.margin = margin(-10, 0, 0, 0))+
@@ -422,7 +422,8 @@ mssrt <- FindClusters(mssrt, verbose = FALSE)
 DimPlot(mssrt, label = TRUE)
 ```
 
-## Prostate Cancer Genome Atlas
+## Prostate Cancer Atlas
+Dynamic_prostate_cancer_transcriptome
 ```{r}
 # atlas <- read.delim("/trigos_team/CASCADE/ExternalDatasets/Public_prostate_single_cell/Dynamic_prostate_cancer_transcriptome/pca_atlas_dataset/pcatlas_dataset_vst_normalized.txt")
 # atlas <- readRDS("~/CASCADEpaper/paper/External_data_objects/pcatlas_dataset/atlas_vst_normalized.Rds")

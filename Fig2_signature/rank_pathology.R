@@ -13,40 +13,45 @@ ar_score <- sort(ar_score)
 
 phenotype_meta$ar_path <- ifelse(ar_score[phenotype_meta$sample] > 0, "positive", "negative")
 
-g <- ggplot(phenotype_meta, aes(x = ar_path, y = AR_exp )) + geom_boxplot()+
-  theme_classic(base_size = 18)+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+
-  scale_x_discrete(labels  = xlab)+
-  
-  labs(x  =  "rank by AR H-score", y = "AR expression")
-
-g <- ggboxplot(phenotype_meta, x = "ar_path", y = "AR_exp")+ 
-  stat_compare_means( method = "wilcox") +theme_classic(base_size = 18)+
+compare_means(AR_exp~ar_path, data = phenotype_meta, p.adjust.method = "bonferroni")
+g <- ggplot(phenotype_meta, aes(x = ar_path, y = AR_exp)) + 
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1), alpha = 0.3, color = "grey")+
+  geom_violin()+
+  stat_compare_means( method = "wilcox", label = "p.signif", label.x.npc = 0.5)+
+  theme_minimal(base_size = 18)+
   labs(x = "AR H score", y = "AR expression")
+
 phenotype_meta %>% group_by(ar_path) %>% summarise(mean = mean(AR_exp))
 
 mycomp <- list(c("AD", "NE"), c("AD", "Mixed"), c("Mixed", "NE"))
-p <- ggboxplot(phenotype_meta, x = "pathology", y = "AR_exp")+ 
-  stat_compare_means( method = "wilcox", comparisons = mycomp) + theme_classic(base_size = 18)+
-  labs(x = "phathology group", y = "AR expression")
+p <- ggplot(phenotype_meta, aes(x = pathology, y = AR_exp)) + 
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1), alpha = 0.3, color = "grey")+
+  geom_violin(width = 1.2)+
+  stat_compare_means( method = "wilcox", comparisons = mycomp, label = "p.signif")+
+  theme_minimal(base_size = 18)+
+  labs(x = "Pathology group", y = "AR expression")
 phenotype_meta %>% group_by(pathology) %>% summarise(mean = mean(AR_exp))
+
+compare_means(AR_exp~pathology, data = phenotype_meta, p.adjust.method = "bonferroni")
 insm1_score <- c(0.003333333, 0.02, 0.013333333, 0.006666667, 0, 0.006666667, 0.006666667, 0, 0, 0, 0, 0, 0.8, 0.7, 0.5, 0.8, 0.1, 0.333333333, 0.003333333, 0.016666667, 0.066666667, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0.3, 0.4, 0.15, 0.3)
 insm1_score <- sort(setNames(insm1_score, sample))
 phenotype_meta$insm1_path <- ifelse(insm1_score[phenotype_meta$sample] > 0, "positive", "negative")
 
-g2 <- ggplot(phenotype_meta, aes(x = factor(sample, levels = names(insm1_score)), fill = patient, y = ASCL1_exp )) + geom_boxplot()+
-  theme_classic(base_size = 18)+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+
-  scale_x_discrete(labels  = xlab)+
-  scale_fill_manual(values = patient_cols) + 
-  labs(x  =  "rank by INSM1 H-score", y = "ASCL1 expression")
-g2 <- ggboxplot(phenotype_meta, x = "insm1_path", y = "ASCL1_exp")+ 
-  stat_compare_means( method = "wilcox") +theme_classic(base_size = 18)+
+compare_means(ASCL1_exp~insm1_path, data = phenotype_meta, p.adjust.method = "bonferroni")
+g2 <- ggplot(phenotype_meta, aes(x = insm1_path, y = ASCL1_exp)) + 
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1), alpha = 0.3, color = "grey")+
+  geom_violin()+
+  stat_compare_means( method = "wilcox", label = "p.signif", label.x.npc = 0.5)+
+  theme_minimal(base_size = 18)+
   labs(x = "INSM1 H score", y= "ASCL1 expression")
 phenotype_meta %>% group_by(insm1_path) %>% summarise(mean = mean(ASCL1_exp))
-p2 <- ggboxplot(phenotype_meta, x = "pathology", y = "ASCL1_exp")+ 
-  stat_compare_means( method = "wilcox", comparisons = mycomp) +theme_classic(base_size = 18)+
-  labs(x = "pathology group", y= "ASCL1 expression")
+p2 <- ggplot(phenotype_meta, aes(x = pathology, y = ASCL1_exp)) + 
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1), alpha = 0.3, color = "grey")+
+  geom_violin(width = 1.2)+
+  stat_compare_means( method = "wilcox", comparisons = mycomp, label = "p.signif")+
+  theme_minimal(base_size = 18)+
+  labs(x = "Pathology group", y= "ASCL1 expression")
+compare_means(ASCL1_exp~pathology, data = phenotype_meta, p.adjust.method = "bonferroni")
 phenotype_meta %>% group_by(pathology) %>% summarise(mean = mean(ASCL1_exp))
 
 g+g2 +p +p2 +plot_layout(nrow = 1)+plot_annotation(tag_levels = 'A', tag_prefix = '(', tag_suffix = ')')& 

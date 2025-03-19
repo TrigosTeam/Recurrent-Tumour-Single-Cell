@@ -28,10 +28,10 @@ discrete_colors <- lapply(pal_names, function(p) {
   try(get(p, envir = asNamespace("pals"))(8), silent = T)  # Get 8 colors from each palette
 })
 
-randcol <- function(n){
-  colors <- unlist(discrete_colors, use.names = F)
-  colors <- unique(colors[nchar(colors) == 7])
-  set.seed(123)
-  sample(colors, size = n)
-}
+# randcol <- function(n){
+#   colors <- unlist(discrete_colors, use.names = F)
+#   colors <- unique(colors[nchar(colors) == 7])
+#   set.seed(123)
+#   sample(colors, size = n)
+# }
 

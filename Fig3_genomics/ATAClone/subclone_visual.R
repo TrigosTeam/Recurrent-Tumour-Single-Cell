@@ -128,7 +128,7 @@ phenotype_meta <- readRDS("~/CASCADEpaper/paper/PSMA/phenotype_meta.Rds")
 xlab <- setNames(paste( phenotype_meta$site, sapply(strsplit(phenotype_meta$sample, split = "_"), function(x) tail(x, 1))), phenotype_meta$sample)
 
 
-for (p in unique(substr(names(subclones), 1, 6))[1]){
+for (p in unique(substr(names(subclones), 1, 6))[c(1,6)]){
   paths <- system(paste0("realpath /trigos_team/CASCADE/Analysis/240628_ATAClone/",p,"/*/joint_cn.Rds"), intern = T)
   joint_cn <- lapply(paths, readRDS)
   sample <- sapply(str_split(paths, "/"), "[", 7)
@@ -171,9 +171,8 @@ for (p in unique(substr(names(subclones), 1, 6))[1]){
                 cluster_columns = F, cluster_rows = F,cluster_row_slices = FALSE, 
                 column_split = factor(chrom, levels = c(1:22, "X", "Y")),  row_split = rol,  row_gap = unit(0, "mm"),
                 show_row_names = F, show_column_names = F, row_title_rot = 0,
-                right_annotation =  rowAnnotation(Subclone = rols, Sample = rols2,
-                                                  col = list(Subclone = setNames(ggsci::pal_futurama()(n_distinct(rols)), unique(as.character(rols))),
-                                                             Sample = setNames(pals::brewer.set3(9)[1:n_distinct(rols2)], unique(rols2))),
+                right_annotation =  rowAnnotation( Sample = rols2,
+                                                  col = list(Sample = setNames(pals::brewer.set3(9)[1:n_distinct(rols2)], unique(rols2))),
                                                   show_annotation_name=F, 
                                                   annotation_legend_param = list(
                                                     labels_gp = gpar(fontsize = 13),
@@ -198,6 +197,11 @@ for (p in unique(substr(names(subclones), 1, 6))[1]){
     theme(legend.position = "bottom")+
     guides(color = guide_legend(ncol = 3,override.aes = list(size = 2)))
   ggsave(paste0("perpatient_subclone_fig/", p,"_UMAP.pdf"),width = 4 , height= 6)
+  f1 <- rmaxes(FeaturePlot(srt, features = "AR", cells = intersect(colnames(srt), rownames(cnmat)))) 
+  f2 <- coneraxes(FeaturePlot(srt, features = "ASCL1", cells = intersect(colnames(srt), rownames(cnmat))))
+  print(f1/f2)
+  ggsave(paste0("perpatient_subclone_fig/", p,"_Feature.pdf"),width = 4 , height= 6)
+  
   VlnPlot(srt,group.by = "subclone", features = c("AR", "ASCL1"), ncol = 1, cols = cols)
   ggsave(paste0("perpatient_subclone_fig/", p,"_Vln.pdf"),width = 4 , height= 6)
   # hit <- findOverlaps(bingr, gf_sub)

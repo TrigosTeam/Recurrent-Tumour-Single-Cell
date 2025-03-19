@@ -89,12 +89,16 @@ srt3 <- srt3 %>%
 
 DimPlot(srt3)
 srt3 <- AddModuleScore(srt3, clean_module)
-f1 <- FeaturePlot(srt3, "Cluster3")+ggtitle("NE1")+NoLegend()
-f2 <- FeaturePlot(srt3, "Cluster4")+ggtitle("NE2")+NoLegend()
+f1 <- FeaturePlot(srt3, "Cluster3")+ggtitle("NE1")+NoLegend()+scale_color_gradientn(colors = brewer.oranges(10))
+f2 <- FeaturePlot(srt3, "Cluster4")+ggtitle("NE2")+NoLegend()+scale_color_gradientn(colors = brewer.oranges(10))
 f3 <- FeaturePlot(srt3, "AR")+NoLegend()
 f4 <- FeaturePlot(srt3, "ASCL1")+NoLegend()
-coneraxes(f3)|rmaxes(f4)|rmaxes(f1)|rmaxes(f2) + plot_annotation(title = "CA90 primary p13")
-ggsave(filename = "primaryCA90p13.pdf", width = 8.8, height = 4, bg = "transparent")
+f5 <- DimPlot(srt3, label = T)+NoLegend()
+colnames(srt3@meta.data)[colnames(srt3@meta.data) %in%  c("Cluster3", "Cluster4")] <- c("NE1", "NE2")
+v1 <- VlnPlot(srt3, features = c("NE1", "NE2"))
+coneraxes(f3)+rmaxes(f4)+rmaxes(f1)+rmaxes(f2)+rmaxes(f5)+v1 + 
+  plot_annotation(title = "CA90 primary p13")+plot_layout(nrow=1, ncol= 6, widths = c(1, 1, 1, 1, 1,3))
+ggsave(filename = "primaryCA90p13.pdf", width = 18, height = 4, bg = "transparent")
 
 FeaturePlot(srt3, c("Cluster3", "Cluster4"), blend = T)
 
@@ -132,13 +136,17 @@ srt3 <- srt3 %>%
 
 DimPlot(srt3)
 srt3 <- AddModuleScore(srt3, clean_module)
-f1 <- FeaturePlot(srt3, "Cluster3")+ggtitle("NE1")+NoLegend()
-f2 <- FeaturePlot(srt3, "Cluster4")+ggtitle("NE2")+NoLegend()
+f1 <- FeaturePlot(srt3, "Cluster3")+ggtitle("NE1")+NoLegend()+scale_color_gradientn(colors = brewer.oranges(10))
+f2 <- FeaturePlot(srt3, "Cluster4")+ggtitle("NE2")+NoLegend()+scale_color_gradientn(colors = brewer.oranges(10))
 f3 <- FeaturePlot(srt3, "AR")+NoLegend()
 f4 <- FeaturePlot(srt3, "ASCL1")+NoLegend()
-coneraxes(f3)|rmaxes(f4)|rmaxes(f1)|rmaxes(f2) + plot_annotation(title = "CA90 primary p18")
+f5 <- DimPlot(srt3, label = T)+NoLegend()
+colnames(srt3@meta.data)[colnames(srt3@meta.data) %in%  c("Cluster3", "Cluster4")] <- c("NE1", "NE2")
+v1 <- VlnPlot(srt3, features = c("NE1", "NE2"))
+coneraxes(f3)+rmaxes(f4)+rmaxes(f1)+rmaxes(f2)+rmaxes(f5)+v1 + 
+  plot_annotation(title = "CA90 primary p18")+plot_layout(nrow=1, ncol= 6, widths = c(1, 1, 1, 1, 1,3))
 
-ggsave(filename = "primaryCA90p18.pdf", width = 8.8, height = 4, bg = "transparent")
+ggsave(filename = "primaryCA90p18.pdf", width = 18, height = 4, bg = "transparent")
 
 FeaturePlot(srt3, c("Cluster3", "Cluster4"), blend = T)
 

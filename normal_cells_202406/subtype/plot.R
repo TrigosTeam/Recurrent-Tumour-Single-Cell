@@ -65,24 +65,33 @@ df$cell_type <- ifelse(df$cell_anno%in% c("T cells","B cells","Plasma cells",  "
                        ifelse(df$cell_anno%in% c("Fibroblasts","Adipocytes","Pericytes", "Endothelial cells"), "stromal cells", "others"))
 df$pathology <- ifelse(df$patient %in% c("CA0090", "CA0046"), "NE", ifelse(df$patient %in% c("CA0027", "CA0058"), "Mixed", "AD"))
 df$patient <- gsub("00", "", df$patient)
-df$labs <- paste0(signif(df$freq*100, 2), "%")
+df$labs <- paste0(signif(df$freq*100, 2))
 df$labs[df$freq < 0.03] <- NA
 xlab <- setNames(df$site, df$sample)
 xlab <- paste(xlab, sapply(strsplit(names(xlab), split = "_"), function(x) tail(x, 1)))
 xlab <- setNames(xlab, df$sample)
+df2 <- df %>% group_by(sample) %>% mutate(n = sum(n))
 
 f <- ggplot(df, aes(x = sample, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
   geom_text(aes(label = labs),
             position = position_stack(vjust = 0.5),        # Position text in the middle of the bars
             color = "white",                               # Set text color
             size = 3)+
+  geom_text(data=df2,aes(x=sample,y=1,label=n),hjust=0, angle = 90)+
   ggh4x::facet_nested(.~pathology+patient, scales = "free", space = "free") + 
-  theme_bw(base_size = 18) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), 
+  theme_bw(base_size = 18) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), 
                                    panel.spacing = unit(0.1, "cm"), 
-                                   strip.background = element_rect(fill = "white"))+
+                                   strip.background = element_rect(fill = "white"),
+                                   legend.position = "none",
+        plot.margin = margin(r = -5))+
   scale_fill_manual(values =normal_cols )+
-  scale_x_discrete(labels= xlab)
+  scale_x_discrete(labels= xlab)+
+  scale_y_continuous(breaks = seq(0, 1, by = 0.25), limits = c(0, 1.1))+
+  labs(x = "Sample", y = "Cell Proportion")
+f
 ggsave("pdf/barplot_per_sample.pdf",f,  width = 18, height = 5)
+
 
 tb<- compare_means(freq~patient, df, group.by = "cell_anno", p.adjust.method = "bonferroni") #all not_significant
 write.table(tb, "cell_anno_freq_bwt_patient.csv", quote = F, row.names = F)
@@ -144,7 +153,7 @@ p1+g+plot_layout(widths = c(2, 3))
 ggsave("pdf/average_ferq_pathology.pdf", width = 9, height = 5)
 # by site
 df <- normal3@meta.data %>% group_by(site,cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
-df$labs <- paste0(signif(df$freq*100, 2), "%")
+df$labs <- paste0(signif(df$freq*100, 2))
 df$labs[df$freq < 0.03] <- NA
 df2 <- df %>% group_by(site) %>% mutate(n = sum(n))
 
@@ -152,16 +161,23 @@ f2 <- ggplot(df, aes(x = site, y = freq, fill = cell_anno)) + geom_bar(stat = "i
   geom_text(aes(label = labs),
             position = position_stack(vjust = 0.5),        # Position text in the middle of the bars
             color = "white",                               # Set text color
-            size = 4)+
-  theme_bw(base_size = 20) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+
+            size = 3)+
+  theme_bw(base_size = 20) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none", 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(), 
+        axis.title.y = element_blank(), 
+        plot.margin = margin(l = -5))+
   scale_fill_manual(values =normal_cols)+
   geom_text(data=df2,aes(x=site,y=1,label=n),hjust=0, angle = 90)+
-  scale_y_continuous(breaks = seq(0, 1, by = 0.2), limits = c(0, 1.1))+
-  labs(y = "Proportion", x = "Sites")
+  scale_y_continuous(breaks = seq(0, 1, by = 0.25), limits = c(0, 1.1))+
+  labs(y = "Cell Proportion", x = "Sites")
 
 f2
 ggsave("pdf/barplots_per_site.pdf", f2,width = 6, height = 5)
-# 
+
+f + f2 + plot_layout(widths = c(3, 1))
+ggsave("pdf/F-barplot.pdf", width = 12, height = 5)
 
 ##### by cell anno color by patient and site --------
 

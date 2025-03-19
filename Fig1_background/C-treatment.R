@@ -23,7 +23,6 @@ temp$ID <- gsub("00", "", temp$ID)
 temp$phenotype <- ifelse(temp$ID %in% c("CA27", "CA58"), "Mixed", ifelse(temp$ID %in% c("CA46", "CA90"), "NE", "AD"))
 temp$ID <- factor(temp$ID, levels = rev(unique(temp$ID[order(temp$phenotype)])))
 
-swimmer_plot(df = temp, id = "ID", end = "time",start ="start", col = "black", name_fill = "treatment", id_order = "phenotype")
 
 
 temp$treatment_ordered <- factor(paste(temp$Treatment, temp$ID), levels = paste(temp$Treatment, temp$ID)[order(temp$time)])
@@ -38,25 +37,6 @@ pie(rep(1,n), col=sample(col_vector, n))
 colors <- setNames(object = kelly(18), unique(temp$Treatment))
 
 temp$tile_start <- temp$start + temp$Duration/2 #START AT TILE CENTER
-ggplot(temp, aes(x = tile_start, y = ID, fill = Treatment, width = Duration))+
-  geom_tile(colour = "black", height = 0.8)+ theme_classic() + 
-  scale_fill_manual(values = sample(col_vector, 18), breaks = aggregate(order~Treatment, data = temp, sum) %>% arrange(order) %>% pull(Treatment)) +
-  theme(legend.position = "bottom", text = element_text(size = 13)) + 
-  xlab("Duration (months)") + 
-  ylab("Patient ID") + 
-  facet_grid(phenotype~., scales = "free", space = "free")
-
-
-
-g <- ggplot(temp, aes(x = Duration, y = ID, fill = treatment))+
-  geom_bar(stat = "identity", width = 0.5)+ theme_classic() + 
-  scale_fill_manual(values = colors[temp$treatment[order(temp$time)]]) +
-  theme(text = element_text(size = 13)) + 
-  xlab("Duration (months)") + 
-  ylab("Patient ID") + labs(fill = "Treatment")+
-  guides(fill = guide_legend(ncol = 2))
-leg <- get_legend(g)
-as_ggplot(leg)
 
 
 [1] "#7FC97F" "#BEAED4" "#FDC086" "#FFFF99" "#386CB0" "#F0027F" "#BF5B17" "#666666" "#1B9E77" "#D95F02" "#7570B3" "#E7298A" "#66A61E"
@@ -104,8 +84,8 @@ p <- ggplot(temp)+
   geom_tile(aes(x = tile_start, y = ID, fill = Treatment, width = Duration, height = height),colour = "black")+  
   scale_fill_manual(values = cols) +
   geom_point( aes(x = values, y= ID, shape = treatment, color = treatment), size = 7, stroke = 1)+
-  scale_shape_manual(values = c("\u006c" ,"\u2715", "\u26a1", "\u26a1"), breaks = unique(temp$treatment)[c(1, 3, 2, 4)])+
-  scale_color_manual(values = c("black", "black", "gold2", "gold2"), breaks = unique(temp$treatment)[c(1, 3, 2, 4)])+
+  scale_shape_manual(values = c("\u006c" ,"\u2715", "\u26a1", "\u26a1"), breaks = unique(temp$treatment)[c(2, 3, 1, 4)])+
+  scale_color_manual(values = c("black", "black", "gold2", "gold2"), breaks = unique(temp$treatment)[c(2, 3, 1, 4)])+
   xlab("Duration (months)") + 
   ylab("Patient ID") + 
   facet_grid(phenotype~., scales = "free", space = "free") + 

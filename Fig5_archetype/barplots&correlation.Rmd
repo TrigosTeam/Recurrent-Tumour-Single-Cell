@@ -107,11 +107,11 @@ moduledf <- df
 
 moduledf$labs <- paste0(signif(moduledf$freq*100, 2), "%")
 moduledf$labs[moduledf$freq<0.03] <- NA
-
+saveRDS(moduledf, "moduledf.Rds")
 ggplot(moduledf, aes(x = sample, y = freq, fill =module)) + geom_bar(stat = "identity") + 
   geom_text(aes(label = labs),
             position = position_stack(vjust = 0.5),        # Position text in the middle of the bars
-            color = "white",                               # Set text color
+            color = "black",                               # Set text color
             size = 4)+
   ggh4x::facet_nested(.~patient, scales = "free", space = "free") +
   scale_fill_manual(values = as.character(colors)) + 
@@ -121,11 +121,31 @@ ggplot(moduledf, aes(x = sample, y = freq, fill =module)) + geom_bar(stat = "ide
         axis.title.x = element_blank(), panel.spacing = unit(0, "cm"))+
   scale_x_discrete(breaks = df$sample, labels= paste(sites, sapply(strsplit(df$sample, split = "_"), function(x) tail(x, 1))))+
   labs(y = "Cell Proportion")
-saveRDS(moduledf, "moduledf.Rds")
+
 ggsave("pdf/all_expression_moudle.pdf", width = 18, height = 5)
 
 ```
-
+###by sites 
+```{r fig.height=5, fig.width=18}
+moduledf$site <- sites
+moduledf$patient <- gsub("CA", "", moduledf$patient)
+p <- ggplot(moduledf, aes(x = sample, y = freq, fill =module)) + geom_bar(stat = "identity") + 
+  geom_text(aes(label = labs),
+            position = position_stack(vjust = 0.5),        # Position text in the middle of the bars
+            color = "black",                               # Set text color
+            size = 4)+
+  scale_fill_manual(values = as.character(colors)) + 
+  ggh4x::facet_nested(.~site+patient, scales = "free", space = "free") + 
+  theme_classic(base_size = 18)+
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90), legend.position = "none", 
+        axis.title.x = element_blank(), panel.spacing = unit(0, "cm"))+
+  scale_x_discrete(breaks = df$sample, labels= paste(sites, sapply(strsplit(df$sample, split = "_"), function(x) tail(x, 1))))+
+  labs(y = "Cell Proportion")
+p
+ggsave("pdf/expression_moudle_bysite.pdf", width = 18, height = 5)
+moduledf$patient <- paste0("CA", moduledf$patient)
+```
+compare cycling module proportion between pathology
 ```{r}
 
 moduledf %>% filter(module == "Module5 high") %>% group_by(pathology) %>% summarise(mean = mean(freq))
@@ -146,57 +166,20 @@ table(rankdf$module, rankdf$order)
 rankdf$test <- grepl("Module6", rankdf$module)|grepl("Module1", rankdf$module)
 table(rankdf$test, rankdf$order)
 ```
-### by sites
-```{r}
-meta2 <- meta
-df <- meta %>% group_by(site, group) %>% summarise(n = n()) %>% mutate(freq = n/sum(n))
-
-df$group  <- gsub("_", "", df$group)
-colnames(df) <- c("site", "module", "n","freq")
-df$labs <- paste0(signif(df$freq*100, 2), "%")
-df$labs[df$freq < 0.03] <- NA
-g <- ggplot(df, aes(x = site, y = freq, fill =module)) + geom_bar(stat = "identity") +
-    geom_text(aes(label = labs),
-            position = position_stack(vjust = 0.5),        # Position text in the middle of the bars
-            color = "white",                               # Set text color
-            size = 4)+
-  scale_fill_manual(values = colors) + 
-  theme_classic(base_size = 18)+
-  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90), legend.position = "none")+
-  labs(x = "Site", y = "Cell Proportion")
-
-meta2$group[grep("&", meta2$group)] <- "transition"
-df <- meta2 %>% group_by(site, group) %>% summarise(n = n()) %>% mutate(freq = n/sum(n))
-df$group  <- gsub(" high", "", df$group)
-colnames(df) <- c("site", "module", "n","freq")
-colors2 <- c(color_high, setNames(c("lightgrey", "slategrey"), c("low expression", "transition")))
-names(colors2)[1:6] <- names(final_signature)
-df$labs <- paste0(signif(df$freq*100, 2), "%")
-df$labs[df$freq < 0.03] <- NA
 
 
-g2 <- ggplot(df, aes(x = site, y = freq, fill =module)) + geom_bar(stat = "identity") + 
-  geom_text(aes(label = labs),
-            position = position_stack(vjust = 0.5),        # Position text in the middle of the bars
-            color = "white",                               # Set text color
-            size = 4)+
-  scale_fill_manual(values = colors2) + 
-  theme_classic(base_size = 18)+
-  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90), legend.position = "none")+
-  labs(x = "Site", y = "Cell Proportion")
-p <- g/g2 + plot_layout(guides= "collect", axes = "collect") 
-# ggsave("pdf/expression_moudle_bysite.pdf", width = 7, height = 5)
-p
-```
-
-
-```{r legends, fig.height=6, fig.width=6}
+```{r legends, fig.height=3, fig.width=18}
 df <- moduledf
 p1 <- ggplot(df[grepl("high|low expression", df$module), ], aes(x = sample, y = freq, fill =module)) + geom_bar(stat = "identity") + 
   facet_grid(.~patient, scales = "free", space = "free") +
-  scale_fill_manual(values = colors, name = "Module", guide = guide_legend(nrow = 2), labels = c(paste(new_name, "high"),   "low expression")) + 
+  theme(legend.margin = margin(l = -20, r=-10), 
+        #legend.spacing.x = unit(6,"inches"), 
+        legend.key.size = unit(6, "inches"))+
+  scale_fill_manual(values = colors, name = "Module", guide = guide_legend(nrow = 4), labels = c(paste(new_name, "high"),   "low expression")) + 
   facet_grid(.~pathology+patient, scales = "free", space = "free") + 
   theme_bw(base_size = 18)
+lg1 <- as_ggplot(get_legend(p1))
+lg1 <- lg1 + theme(plot.margin = margin(l = -20))
 
 subdf <- df[grepl("&", df$module), ] %>% filter(freq > 0.01) #%>% group_by(sample) %>% arrange(desc(freq)) %>% slice(1:5)
 labs <- names(colors)[grepl("&", names(colors))]
@@ -207,19 +190,20 @@ p3 <- ggplot(subdf, aes(x = sample, y = freq, fill =module)) + geom_bar(stat = "
                     labels = labs) + 
   facet_grid(.~pathology+patient, scales = "free", space = "free") + 
   theme_bw(base_size = 18)+
-  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90))
+  theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90), 
+        legend.margin = margin(r = 1))+
+  guides(fill = guide_legend(nrow = 7))
 
-lg1 <- as_ggplot(get_legend(p1))
+
 lg3 <- as_ggplot(get_legend(p3))
 
-lg1
-lg3
-
+lg1+lg3+plot_layout(widths = c(1,3))
+ggsave("pdf/module_legend.pdf", width = 18, height = 3)
 ```
 
 
-```{r fig.height=5, fig.width=18}
-p|(lg1/lg3)
+```{r fig.height=7, fig.width=18}
+p/(lg1+lg3)+plot_layout(heights = c(5,2), widths = c(2, 3))
 ggsave("pdf/expression_moudle_bysite.pdf", width = 18, height = 7)
 ```
 ### piechart for module proportion
@@ -1024,7 +1008,7 @@ sites[grep("lung", sites)] <- "lung"
 sites[grep("abdomen", sites)] <- "abdomen"
 sites[grep("bladder", sites)] <- "bladder"
 df$site <- sites
-
+df <- df %>% filter(n >10)
 
 head(moduledf)
 tumour_cells <- meta %>% group_by(sample) %>% summarise(n= n()) %>% pull(n)
@@ -1038,29 +1022,19 @@ df2 <- as.data.frame(df2)
 rownames(df2) <- df2$sample
 df2 <- df2[, 2:7]
 df2 <- as.data.frame(apply(df2, 2, function(x) x/tumour_cells ))
-df2 <- df2 %>% mutate(tile1 = ordered(ntile(n1, 5)),
-                      tile2 =  ordered(ntile(n2, 5)),
-                      tile3 =  ordered(ntile(n3, 5)),
-                      tile4 =  ordered(ntile(n4, 5)),
-                      tile5 =  ordered(ntile(n5, 5)),
-                      tile6 =  ordered(ntile(n6, 5)))
 df2$sample <- rownames(df2)
-temp1 <- reshape2::melt(df2[,c(1:6, 13)], id.vars = "sample", variable.name = "n", value.name = "prop")
-temp1 <- temp1 %>% group_by(n) %>% mutate(tile = ordered(ntile(prop, 5)))
-temp1$n <- as.character(temp1$n)
-for (i in 1:6){
-  temp1$n[temp1$n == paste0("n", i)] <- new_name[i]
-}
-colnames(temp1) <- c("sample", "module", "prop", "tile")
-temp1 <- merge(df, temp1, by = "sample", all.x = T, all.y = F)
-
+temp1 <- sapply(df2[, c(paste0("n", 1:6))], function(x) ordered(ntile(x, 5)))
+temp1 <- as.data.frame(temp1) %>% `colnames<-`(paste0("tile", 1:6))
+df2 <- cbind(df2, temp1)
 temp  <- merge(df, df2, by = "sample", all.x = T, all.y = F)
+
 
 plotdf <- data.frame()
 pdf("pdf/normalcell_propVSbinedmoduleprop_n=5.pdf", width = 10, height = 5)
 for (n in levels(normal3$cell_anno)){
   subdf <-temp[temp$cell_anno == n,]
   for (m in 1:6){
+    if (n_distinct(subdf[, paste0("tile", m )])==5 & all(table(subdf[, paste0("tile", m )])>=3)){
     test <- DescTools::JonckheereTerpstraTest(subdf$freq, g = subdf[, paste0("tile", m )], alternative = "increasing", nperm = 5000)
     test2 <- DescTools::JonckheereTerpstraTest(subdf$freq, g = subdf[, paste0("tile", m )], alternative = "decreasing", nperm = 5000)
     f <- ggplot(subdf, aes(x = subdf[, paste0("tile", m )], y = freq)) + geom_violin()+
@@ -1084,7 +1058,7 @@ for (n in levels(normal3$cell_anno)){
                                          Cor = cor$estimate,
                                          CorP = cor$p.value))
     }
-    
+    }else{print("not enough sample")}
   }
   print (n)
 }
@@ -1092,12 +1066,13 @@ dev.off()
 
 saveRDS(plotdf, "propModulenormal.Rds")
 ```
-```{r}
+```{r fig.height=4, fig.width=18}
 plotdf$module[plotdf$module == "Hypoxia"] <- "Glycolysis"
 plotdf$module <- factor(plotdf$module, levels = new_name)
 
 ggplot(plotdf, aes(x = tile, y = freq,fill = module)) + geom_violin()+
-  geom_boxplot(outlier.shape = NA, width = 0.1) + geom_jitter(aes(colour = patient)) + 
+  geom_boxplot(outlier.shape = NA, width = 0.1) + 
+  geom_jitter(aes(colour = patient), width = 0.1) + 
   scale_color_manual(values  = patient_cols)+
   scale_fill_manual(values = module_cols2)+
   theme_bw()+
@@ -1111,7 +1086,7 @@ ggplot(plotdf, aes(x = tile, y = freq,fill = module)) + geom_violin()+
         legend.title = element_text(size = 16))+
   guides(fill = guide_legend(nrow = 1),
          color = guide_legend(nrow = 1))+
-  labs(y = "Proportion", x = "Expression Levels of Modules", fill = "Module", color = "Patient")
+  labs(y = "Proportion", x = "Cell Proportion Levels of Modules", fill = "Module", color = "Patient")
 ggsave("pdf/JTtestn.pdf", width = 18, height = 3.5)
 ```
 
@@ -1143,7 +1118,7 @@ sites[grep("lung", sites)] <- "lung"
 sites[grep("abdomen", sites)] <- "abdomen"
 sites[grep("bladder", sites)] <- "bladder"
 df$site <- sites
-
+df <- df %>% filter(n >=10) ## Add a cell number filter
 
 
 df2 <- meta %>% group_by(sample) %>% summarise(avg1 = mean(Module1),
@@ -1166,6 +1141,7 @@ pdf("pdf/normalcell_propVSbinedmodule_n=5.pdf", width = 9, height = 5)
 for (n in levels(normal3$cell_anno)){
   subdf <-temp[temp$cell_anno == n,]
   for (m in 1:6){
+        if (n_distinct(subdf[, paste0("tile", m )])==5 & all(table(subdf[, paste0("tile", m )])>=3)){
     test <- DescTools::JonckheereTerpstraTest(subdf$freq, g = subdf[, paste0("tile", m )], alternative = "increasing", nperm = 5000)
     test2 <- DescTools::JonckheereTerpstraTest(subdf$freq, g = subdf[, paste0("tile", m )], alternative = "decreasing", nperm = 5000)
   f <- ggplot(subdf, aes(x = subdf[, paste0("tile", m )], y = freq)) + geom_violin()+
@@ -1188,12 +1164,15 @@ for (n in levels(normal3$cell_anno)){
                                        JTdecP = test2$p.value,
                                        Cor = cor$estimate,
                                        CorP = cor$p.value))
-  }
+      
+    }
+  }else{print("not enough sample")}
   
   }
   print (n)
 }
 dev.off()
+saveRDS(plotdf, "sigModulenormal.Rds")
 ```
 
 ```{r fig.height=4, fig.width=18}
@@ -1213,7 +1192,7 @@ sigModulenormal$module <- factor(sigModulenormal$module, levels = new_name)
 sigModulenormal$cell_anno <- as.character(sigModulenormal$cell_anno)
 sigModulenormal$cell_anno[sigModulenormal$cell_anno == "Lymphatic endothelial cells"] <- "Lymphatic\nendothelial"
 ggplot(sigModulenormal, aes(x = tile, y = freq,fill = module)) + geom_violin()+
-  geom_boxplot(outlier.shape = NA, width = 0.1) + geom_jitter(aes(colour = patient)) + 
+  geom_boxplot(outlier.shape = NA, width = 0.1) + geom_jitter(aes(colour = patient), width = 0.2) + 
   scale_color_manual(values  = patient_cols)+
   scale_fill_manual(values = module_cols2)+
   theme_bw()+
