@@ -10,7 +10,7 @@ library(RColorBrewer)
 library(scales)
 library(ggpubr)
 library(patchwork)
-setwd("~/CASCADEpaper/paper/Fig1_background")
+setwd("~/Fig1_background")
 # version 1 ---------------------------------------------------------------
 treatment_history <- read_excel("treatment_history.xlsx")
 colnames(treatment_history) <- c("ID", "Treatment", 'Duration',"order")
@@ -140,6 +140,7 @@ legs <- plot_grid(plotlist = legends, align = "v",axis = "tl", ncol = 2,nrow = 4
 ggdraw(legs)
 plot_grid(p, legs, rel_widths = c(8, 3), nrow = 1, greedy = F)
 
+# save legends seperately
 for(i in seq_along(legends)){
   temp2 <- legends[[i]]
   pdf(paste0("legends/", i, ".pdf"))
@@ -147,3 +148,4 @@ for(i in seq_along(legends)){
   dev.off()
   print(i)
 }
+

@@ -1,7 +1,3 @@
-# pathtable <- read.csv("~/CASCADEpaper/paper/Fig1/pathology review summary.csv", sep = ",")
-# pathtable$patient <- gsub(" $", "", pathtable$patient)
-# pathology_review <- readRDS("~/CASCADEpaper/paper/Fig1/pathology_review.Rds")
-# pathology_review$patient <- gsub(" $", "", pathology_review$patient)
 library(ComplexHeatmap)
 library(RColorBrewer)
 library(circlize)

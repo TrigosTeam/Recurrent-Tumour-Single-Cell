@@ -1,0 +1,113 @@
+---
+title: "genefusion oncoplot"
+output: html_notebook
+---
+
+```{r}
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+genef_table <- readRDS("~/Fig3_genomics_normal_cells/structure_variants/genef_table.Rds")
+sv <- readRDS("~/Fig3_genomics_normal_cells/structure_variants/sv_list.Rds")
+```
+
+```{r}
+
+GF_mat <- matrix(nrow = 43, ncol = 21)
+colnames(GF_mat) <- names(sv)
+rownames(GF_mat) <- unique(genef_table$pair)
+
+for(i in colnames(GF_mat)){
+  for(n in rownames(GF_mat)){
+    df <- genef_table[genef_table$sample==i&genef_table$pair==n,]
+    if(nrow(df)>0){
+      GF_mat[n, i] <- paste(unique(df$type), collapse = "+")
+    }
+  }
+}
+
+class(GF_mat) <- "character"
+```
+
+
+
+```{r fig.height=11, fig.width=6}
+colors <- brewer.pal(5, "Dark2")
+colors <- setNames(colors, c("inversion", "deletion" ,  "translocation","inversion+deletion", "tandem_duplication"))
+
+anno_col <- brewer.pal(6, "Set3")
+anno_col <- setNames(anno_col, unique(substr(colnames(GF_mat), 1,6)))
+
+m = apply(GF_mat, 1, table)
+ha = rowAnnotation( bar = anno_barplot(m, gp = gpar(fill = anno_col)))
+
+gf <- Heatmap(mat = GF_mat,na_col = "grey", col= colors, name = "gene fusion",  rect_gp = gpar(col = "white", lwd = 2), 
+        column_names_gp = gpar(fontsize = 7), row_names_gp = gpar(fontsize = 8),
+        top_annotation = HeatmapAnnotation(sample = substr(colnames(GF_mat), 1,6), col = list(sample = anno_col)))
+draw(gf, merge_legend = T)
+
+
+```
+
+```{r fig.height=11, fig.width=8}
+alter_fun  <- lapply(colors, function(x) return(alter_graphic("rect", width = 0.9, height = 0.9, fill = x)))
+alter_fun$background <- alter_graphic("rect", width = 0.9, height = 0.9, fill = "#CCCCCC")
+
+g <- oncoPrint(GF_mat, alter_fun =  alter_fun, col = colors, show_column_names = T, top_annotation = HeatmapAnnotation(bar = anno_oncoprint_barplot(names(colors)),
+                         sample = substr(colnames(GF_mat), 1,6), col = list(sample = anno_col)))
+
+draw(g)
+
+```
+
+```{r fig.height=6, fig.width=7}
+DDR <- unique(c("BRCA1", "BRCA2", "ATM", "BRIP1", "BARD1", "CDK12", "CHEK1", "CHEK2", "FANCL", "PALB2", "PPP2R2A", "RAD51C", "RAD51D", "RAD54L", #HRR PROfound genes RAD51B
+                "BRAC1", "BRAC2", "PALB2", "BRIP", "FANC", "RAD51B", "RAD51C", "RAD51D", "RAD54L", "CHEK1", "ATM", "CDK12", "PALB2", "RAD51", "FANCA", "HDAC2", "BRIP1", "MLH1", "MRE11A", "NBN"))
+
+
+
+sv_list<- lapply(sv, function(x){
+  temp <- sapply(DDR, function(y){
+    a <- grep(pattern = y, x = x$start_gene)
+    b <- grep(pattern = y, x = x$end_gene)
+  })
+  return(x[unique(unlist(temp)),])
+})
+
+svtable <- rbindlist(sv_list, idcol = "sample")
+svtable$pair <- paste(svtable$start_gene, svtable$end_gene, sep = "-")
+
+
+SV_mat <- matrix(nrow = length(unique(svtable$pair)), ncol = 21)
+colnames(SV_mat) <- names(sv)
+rownames(SV_mat) <- unique(svtable$pair)
+
+
+for(i in colnames(SV_mat)){
+  for(n in rownames(SV_mat)){
+    df <- svtable[svtable$sample==i&svtable$pair==n,]
+    if(nrow(df)>0){
+      SV_mat[n, i] <- paste(unique(df$sv), collapse = "+")
+    }
+  }
+}
+
+class(SV_mat) <- "character"
+
+colors <- brewer.pal(5, "Dark2")
+colors <- setNames(colors, c("inversion", "deletion" ,  "translocation","inversion+deletion", "tandem_duplication"))
+
+anno_col <- brewer.pal(6, "Set3")
+anno_col <- setNames(anno_col, unique(substr(colnames(SV_mat), 1,6)))
+
+alter_fun  <- lapply(colors, function(x) return(alter_graphic("rect", width = 0.9, height = 0.9, fill = x)))
+alter_fun$background <- alter_graphic("rect", width = 0.9, height = 0.9, fill = "#CCCCCC")
+
+g <- oncoPrint(SV_mat, alter_fun =  alter_fun, col = colors, show_column_names = T, 
+               top_annotation = HeatmapAnnotation(bar = anno_oncoprint_barplot(names(colors)),
+                                                  sample = substr(colnames(SV_mat), 1,6), 
+                                                  col = list(sample = anno_col)))
+
+draw(g, merge_legend = T)
+```
+

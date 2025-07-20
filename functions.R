@@ -291,7 +291,7 @@ preprocess_srt <- function(normal2){
   return(normal2)
 }
 
-#subc <- readRDS(paste0("~/CASCADEpaper/paper/normal_cells_202406/subtype/", celltype, ".Rds"))
+#subc <- readRDS(paste0("~/normal_cell_annotation/subtype/", celltype, ".Rds"))
 plot_subtype <- function(subc, celltype, markerlist){
   p1 <- coneraxes(DimPlot(subc, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)), front.size = 16)+ theme(legend.position = "top", plot.title = element_blank())
   p2 <- DotPlot(subc, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),
@@ -310,7 +310,7 @@ plot_subtype <- function(subc, celltype, markerlist){
   
   g1 <- rmaxes(DimPlot(subc, reduction = "harmony_umap", group.by = "site")+scale_color_manual(values = site_cols)+theme(plot.title = element_blank(), legend.position = "bottom"), front.size = 26)
   g2 <- barplot_bytissue(subc)+NoLegend()
-  markers <- readRDS(paste0("~/CASCADEpaper/paper/normal_cells_202406/subtype/",celltype,"_tissuemarker.Rds"))
+  markers <- readRDS(paste0("~/normal_cell_annotation/subtype/",celltype,"_tissuemarker.Rds"))
   features <- markers %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
   features$cluster <- as.character(features$cluster)
   features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
@@ -324,5 +324,5 @@ plot_subtype <- function(subc, celltype, markerlist){
 }
 
 ##### ggplot theme ----------
-phenotype_meta <- readRDS("~/CASCADEpaper/paper/PSMA/phenotype_meta.Rds")
+phenotype_meta <- readRDS("~/Fig6_PSMA/phenotype_meta.Rds")
 xlab <- setNames(paste(phenotype_meta$site, sapply(strsplit(phenotype_meta$sample, split = "_"), function(x) tail(x, 1))), phenotype_meta$sample)

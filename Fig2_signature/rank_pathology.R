@@ -1,9 +1,9 @@
 library(ggplot2)
 library(patchwork)
 library(ggpubr)
-source("~/CASCADEpaper/paper/cols.R")
-setwd("~/CASCADEpaper/paper/Fig2_signature")
-phenotype_meta <- readRDS("~/CASCADEpaper/paper/PSMA/phenotype_meta.Rds")
+source("~/cols.R")
+setwd("~/Fig2_signature")
+phenotype_meta <- readRDS("~/Fig6_PSMA/phenotype_meta.Rds")
 phenotype_meta$pathology <- ifelse(phenotype_meta$patien %in% c("CA27", "CA58"), "Mixed", ifelse(phenotype_meta$patient %in% c("CA46", "CA90"), "NE", "AD"))
 
 ar_score <- c(0.033333333, 0.016666667, 0.033333333, 0.033333333, 0.75, 0.5, 0.2, 0.6, 0.6, 0.016666667, 0.1, 0.433333333, 0, 0, 0, 0, 0, 0, 0.333333333, 0, 0, 0.016666667, 0, 0.016666667, 0.2, 0.033333333, 0.003333333, 0, 0.9, 0, 0, 0, 0, 0)

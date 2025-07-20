@@ -1,7 +1,7 @@
 library(pals)
 library(scales)
 library(RColorBrewer)
-meta <- readRDS("~/CASCADEpaper/paper/Fig2_signature/signature_meta_tumor_only.Rds")
+meta <- readRDS("~/Fig2_signature/signature_meta_tumor_only.Rds")
 # sites <- colnames(signature_mat)
 # sites[grep("brain", sites)] <- "brain"
 # sites[grep("dura", sites)] <- "dura"
@@ -17,7 +17,7 @@ site_cols <- setNames(brewer.set3(10), unique(meta$site))
 patient_cols <- setNames(hue_pal()(9), gsub("00", "", unique(meta$patient)))
 patient_cols2 <- setNames(hue_pal()(9), unique(meta$patient))
 
-final_normal_anno <- readRDS("~/CASCADEpaper/paper/normal_cells_202406/subtype/final_normal_anno.Rds")
+final_normal_anno <- readRDS("~/normal_cell_annotation/subtype/final_normal_anno.Rds")
 normal_cols <- setNames(brewer.set1(14), levels(final_normal_anno))
 module_cols <- setNames( c("dodgerblue3", brewer.dark2(6)[2:6]),c("Module1", "Module2", "Module3", "Module4", "Module5", "Module6"))
 

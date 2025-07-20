@@ -9,8 +9,8 @@ library(ComplexHeatmap)
 library(circlize)
 library(pals)
 library(cluster)
-source("~/CASCADEpaper/paper/cols.R")
-load("/trigos_team/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
+source("~/cols.R")
+load("~/signatures_analysis/objects/all_gene_sets.rda")
 genelist <- lapply(all_gene_sets, function(x) unique(unlist(x))) # union of different signatures
 
 tang_2022 <- all_gene_sets$tang_2022
@@ -23,7 +23,7 @@ temp <- lapply(all_gene_sets, function(x){
 temp <- temp[!names(temp)%in% c("CRPC", "cancer", "hillock", "metastasis", "club", "invasion", "tang_2022")]
 genelist <- c(temp, tang_2022)
 names(genelist) <- paste0(names(genelist), "_signature")
-meta <- readRDS("~/CASCADEpaper/paper/Fig2_signature/signature_meta_tumor_only.Rds")
+meta <- readRDS("~/Fig2_signature/signature_meta_tumor_only.Rds")
 
 
 signature_score <- meta[, names(genelist)[1:20]]
@@ -99,12 +99,12 @@ ht <- Heatmap(test, name = "module\nscore\nzscore", col = f4,
         column_split = factor(classes, levels = c("AD", "Mixed", "NE")), cluster_column_slices = F,
          heatmap_legend_param = list(direction = "horizontal",title_position = "leftcenter"))
 ht_opt$COLUMN_ANNO_PADDING= unit(1, "mm")
-pdf("~/CASCADEpaper/paper/Fig2_signature/pdf/heatmap.pdf", width = 10*0.7, height = 6*0.7)
+pdf("~/Fig2_signature/pdf/heatmap.pdf", width = 10*0.7, height = 6*0.7)
 draw(ht, merge_legend = F, annotation_legend_side = "right", 
      heatmap_legend_side = "bottom", 
      padding = unit(c(2, 2, 2, 10), "mm"))
 dev.off()
-saveRDS(ht, "~/CASCADEpaper/paper/Fig2_signature/plot_obj/heatmap.Rds")
+saveRDS(ht, "~/Fig2_signature/plot_obj/heatmap.Rds")
 
 ```
 
@@ -249,12 +249,12 @@ ht <- Heatmap(test, name = "module\nscore\nzscore", col = f4,
         column_split = factor(classes, levels = c("AD", "Mixed", "NE")), cluster_column_slices = F,
          heatmap_legend_param = list(direction = "horizontal",title_position = "leftcenter"))
 ht_opt$COLUMN_ANNO_PADDING= unit(1, "mm")
-png("~/CASCADEpaper/paper/Fig2_signature/png/heatmap.png", width = 500, height = 300)
+png("~/Fig2_signature/png/heatmap.png", width = 500, height = 300)
 draw(ht, merge_legend = F, annotation_legend_side = "right", 
      heatmap_legend_side = "bottom", 
      padding = unit(c(2, 2, 2, 10), "mm"))
 dev.off()
-saveRDS(ht, "~/CASCADEpaper/paper/Fig2_signature/plot_obj/heatmap.Rds")
+saveRDS(ht, "~/Fig2_signature/plot_obj/heatmap.Rds")
 
 ```
 
@@ -320,7 +320,7 @@ draw(htAD+htNE, merge_legend = T, )
 
 ## per patient 
 ```{r fig.height=4, fig.width=7}
-paths <- list.files("~/CASCADEpaper/paper/Fig2", pattern =  "_signature_meta.Rds", full.names = T)
+paths <- list.files("~/Fig2", pattern =  "_signature_meta.Rds", full.names = T)
 
 sites <- colnames(scaled_expression)
 sites[grep("brain", sites)] <- "brain"

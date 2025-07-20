@@ -1,0 +1,479 @@
+---
+title: "pseudotime"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(scran)
+library(scater)
+library(data.table)
+library(dplyr)
+library(patchwork)
+library(tidyverse)
+library(MAST)
+library(pals)
+library(TSCAN)
+library(SingleCellExperiment)
+library(circlize)
+
+paths <- system("realpath ~/230113_seurat_intron/*/*/*non_tumour_removed.Rds", intern = T)
+paths_split <- unlist(lapply(strsplit(paths, split = "/"), function(x) paste(x[6], x[7], sep = "_")))
+paths2 <- system("realpath ~/240603_seurat_intron/CA0027/dura*/*non_tumour_removed_v4.Rds", intern = T)
+paths_split2 <- unlist(lapply(strsplit(paths2, split = "/"), function(x) paste(x[6], x[7], sep = "_")))
+
+paths <- c(paths, paths2)
+paths_split <- c(paths_split, paths_split2)
+paths <- setNames(paths,paths_split)
+meta <- readRDS("~/Fig4-5_archetype/5_integrated_final_module_meta.Rds")
+srt<- readRDS(paths[1])
+DefaultAssay(srt) <- "RNA"
+lib.median <- median(srt$nCount_RNA)
+target_pseudocount <- 1
+srt <- srt %>% 
+  NormalizeData(scale.factor = lib.median / target_pseudocount) %>% 
+  ScaleData(do.scale = F)
+
+set.seed(100)
+poisson_fit2 <- modelGeneVarByPoisson(srt@assays$RNA@counts, dispersion = 0.2, size.factors = target_pseudocount * srt$nCount_RNA / lib.median)
+residuals2 <- poisson_fit2$total - poisson_fit2@metadata$trend(poisson_fit2$mean)
+names(residuals2) <- rownames(srt)
+top_genes2 <- rownames(srt)[order(residuals2, decreasing = TRUE)]
+
+srt <- srt %>% 
+  RunPCA(features = top_genes2[1:2000]) %>% 
+  FindNeighbors(dims = 1:20) %>% 
+  FindClusters(resolution = 1) %>% 
+  RunUMAP(dims = 1:20)
+
+clean_module <- readRDS("~/regulon/new_regulon/archetype/2024_06/clean_module.Rds")
+srt <- AddModuleScore(srt, features  = clean_module)
+names(clean_module)
+colnames(srt@meta.data)[grep("Cluster", colnames(srt@meta.data))] <- paste(names(clean_module), "module")
+
+DimPlot(srt, label = T)
+
+sapply(paste(names(clean_module), "module"), function(g){
+  FeaturePlot(srt, g, cols = rev(brewer.rdylbu(10)) )
+})
+
+```
+
+
+
+
+```{r}
+high_cells <-  apply(srt@meta.data[, grep("module", colnames(srt@meta.data))], 2, function(x){
+    bins <- cut(x, breaks = 100)
+  group <- bins %in% levels(bins)[60:100]
+  return(colnames(srt)[group])
+})
+sapply(high_cells , function(x){
+  DimPlot(srt, cells.highlight =x, sizes.highlight = 0.5 )
+})
+
+```
+```{r}
+
+df <- lapply(seq(from = 50, to = 90, by =5), function(p){
+  group<-  apply(srt@meta.data[, grep("module", colnames(srt@meta.data))], 2, function(x){
+    bins <- cut(x, breaks = 100)
+    group <- bins %in% levels(bins)[p:100]
+  })
+  ind_high <- apply(group, 1, function(x) sum(x))
+  return(as.data.frame(table(ind_high)) %>% mutate(cutoff = p))
+})
+df <- rbindlist(df)
+df$cutoff <- factor(df$cutoff, levels = df %>% filter(ind_high ==1) %>% arrange(Freq) %>% pull(cutoff))
+ggplot(df, aes(x = cutoff, y = Freq, fill = factor(ind_high)))+
+  geom_bar(stat = "identity")
+df <- lapply(seq(from = 55, to = 65, by =1), function(p){
+  group<-  apply(srt@meta.data[, grep("module", colnames(srt@meta.data))], 2, function(x){
+    bins <- cut(x, breaks = 100)
+    group <- bins %in% levels(bins)[p:100]
+  })
+  ind_high <- apply(group, 1, function(x) sum(x))
+  return(as.data.frame(table(ind_high)) %>% mutate(cutoff = p))
+})
+df <- rbindlist(df)
+df$cutoff <- factor(df$cutoff, levels = df %>% filter(ind_high ==1) %>% arrange(Freq) %>% pull(cutoff))
+ggplot(df, aes(x = cutoff, y = Freq, fill = factor(ind_high)))+
+  geom_bar(stat = "identity")
+```
+```{r}
+group<-  apply(srt@meta.data[, grep("module", colnames(srt@meta.data))], 2, function(x){
+    bins <- cut(x, breaks = 100)
+    group <- bins %in% levels(bins)[60:100]
+  })
+ind_high <- apply(group, 1, function(x) if(sum(x) > 1) data.frame( group = paste(names(clean_module)[x], collapse = "&"), freq = sum(x)) else if(sum(x)==1) data.frame(group = names(clean_module)[x], freq = 1) else data.frame(group = "background", freq = 0))
+ind_high <- rbindlist(ind_high)
+ind <- grepl("AR&", ind_high$group)&ind_high$freq == 2
+ind_high$group[ind] <- gsub("AR&", "",ind_high$group[ind])
+ind_high$freq[ind] <- ind_high$freq[ind]-1
+
+srt$group <- factor(ind_high$group, levels = ind_high %>% arrange(freq) %>% pull(group) %>% unique())
+color_high <- setNames( c("dodgerblue3", brewer.dark2(6)[2:6]),names(clean_module))
+color_high <- c(color_high, setNames("lightgrey", "background"))
+mixed <- sapply(unique(ind_high$group), function(x){
+  if(grepl("&", x)){
+  modules <- strsplit(x, split = "&")[[1]]
+  if (length(modules) <5){
+  colors <- c(color_high[modules], rep("white", 4-length(modules)))
+  c1 <- colorRamp2(c(0, 1), colors[1:2])(0.5)
+  c2 <- colorRamp2(c(0, 1), colors[3:4])(0.5)
+  final_color <-  colorRamp2(c(0, 1), c(c1, c2))(0.5)
+  return(final_color)} 
+  }else{
+    return(as.character(color_high[x]))
+  }
+})
+srt$group2 <- as.character(srt$group)
+srt$group2[srt$group2 == "NE1&NE2"] <- "NE1-NE2"
+srt$group2[grep("&", srt$group2)] <- "transition"
+srt$group2 <- factor(srt$group2, levels = c(levels(srt$group)[1:7],"NE1-NE2", "transition"))
+DimPlot(srt, group.by = "group", cols = mixed[levels(srt$group)]) 
+DimPlot(srt, group.by = "group2", cols = c(as.character(mixed[levels(srt$group)][1:8]), "grey") )
+
+DimPlot(srt, cells.highlight = colnames(srt)[srt$group == "hypoxia"]) 
+```
+### the largest problem for this method is it demands a singlecellexperiment object'
+
+```{r}
+# library(scran)
+# tumor <- RunTSNE(tumor)
+sce.nest <- as.SingleCellExperiment(srt)#transfer seurat to singlecellexperiment 
+```
+
+```{r}
+
+colLabels(sce.nest) <- sce.nest$group
+by.cluster <- aggregateAcrossCells(sce.nest, ids=sce.nest$group)
+centroids <- reducedDim(by.cluster, "PCA")
+
+# Set clusters=NULL as we have already aggregated above.
+mst <- TSCAN::createClusterMST(centroids, clusters=NULL)
+```
+
+```{r}
+line.data <- reportEdges(by.cluster, mst=mst, clusters=NULL, use.dimred="UMAP")
+
+plotUMAP(sce.nest, colour_by="seurat_clusters") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+
+plotUMAP(sce.nest, colour_by="label") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+plotUMAP(sce.nest, colour_by= "AR") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+plotUMAP(sce.nest, colour_by= "AR.module") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+plotUMAP(sce.nest, colour_by= "ASCL1") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+plotUMAP(sce.nest, colour_by= "NE1.module") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+plotUMAP(sce.nest, colour_by= "NE2.module") + 
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+```
+```{r}
+DimPlot(srt, group.by = "group", cols = mixed[levels(srt$group)]) + geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+```
+```{r}
+colLabels(sce.nest) <- sce.nest$group2
+by.cluster <- aggregateAcrossCells(sce.nest, ids=sce.nest$group2)
+centroids <- reducedDim(by.cluster, "PCA")
+
+# Set clusters=NULL as we have already aggregated above.
+mst <- TSCAN::createClusterMST(centroids, clusters=NULL)
+line.data <- line.data <- reportEdges(by.cluster, mst=mst, clusters=NULL, use.dimred="UMAP")
+DimPlot(srt, group.by = "group2", cols = c(as.character(mixed[levels(srt$group)][1:8]), "grey") )+ geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))+
+  ggtitle("module highly expression cells")
+
+```
+
+We obtain a pseudotime ordering by projecting the cells onto the MST with `mapCellsToEdges()`. More specifically, we move each cell onto the closest edge of the MST; the pseudotime is then calculated as the distance along the MST to this new position from a "root node" with `orderCells()`. For our purposes, we will arbitrarily pick one of the endpoint nodes as the root, though a more careful choice based on the biological annotation of each node may yield more relevant orderings (e.g., picking a node corresponding to a more pluripotent state).
+
+The name of the terminal node that defines this path is recorded in the column names of `tscan.pseudo`. Some cells may be shared across multiple paths, in which case they will have the same pseudotime in those paths.
+
+```{r fig.height=3, fig.width=8}
+colLabels(sce.nest) <- sce.nest$group2
+map.tscan <- mapCellsToEdges(sce.nest, mst=mst, use.dimred="PCA")
+tscan.pseudo <- orderCells(map.tscan, mst, start = "AR")
+common.pseudo <- averagePseudotime(tscan.pseudo) #Compute the average pseudotime for each cell across all paths in which it is involved.
+plotUMAP(sce.nest, colour_by=I(common.pseudo), 
+        text_by="label", text_colour="red") +
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+
+plotUMAP(sce.nest, colour_by=I(common.pseudo), 
+        text_by="seurat_clusters", text_colour="red") +
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+
+plotUMAP(sce.nest, colour_by=I(common.pseudo)) +
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge), color = "red") + ggtitle("pseudotime")
+FeaturePlot(srt, c("NE1 module", "NE2 module"), cols = rev(brewer.rdylbu(10)) )&
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge), color = "red") 
+saveRDS(common.pseudo, "TSCAN.pseudo.Rds")
+```
+```{r}
+
+f1 <- coneraxes(FeaturePlot(srt, "NE1 module", cols = rev(brewer.rdylbu(10)) )+
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge), color = "red")+ggtitle("NE1")+NoLegend())
+
+f2 <- rmaxes(FeaturePlot(srt,"NE2 module", cols = rev(brewer.rdylbu(10)) )+
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge), color = "red")+ggtitle("NE2")+NoLegend())
+f3 <- coneraxes(DimPlot(srt, group.by = "group2", cols = c(as.character(mixed[levels(srt$group)][1:8]), "grey") )+ geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge), color = "red")+
+  ggtitle("Archetype module cells"))
+
+f4 <- coneraxes(FeaturePlot(srt, "pseudo")+scale_colour_gradientn(guide = "colourbar", limits = c(0,50),breaks=c(0,25,50),colors = c("#440154FF", "#22A884FF","yellow"))+geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge), color = "red")+ggtitle("pseudotime"))
+
+f1+f2+f3+f4+plot_layout(widths = c(4,4,6,6), ncol=4)
+ggsave("CA27_13_expression.pdf", width = 20, height = 4, units = "cm")
+```
+
+```{r}
+pseudo.og <- TSCAN::quickPseudotime(sce.nest, use.dimred="PCA", outgroup=TRUE)
+
+library(igraph)
+by.cluster <- aggregateAcrossCells(sce.nest, ids=sce.nest$group)
+centroids <- reducedDim(by.cluster, "PCA")
+
+# Set clusters=NULL as we have already aggregated above.
+mst <- TSCAN::createClusterMST(centroids, clusters=NULL)
+V(mst)$color <- mixed[names(V(mst))]
+labs <- names(V(mst))
+# labs[grepl("&", names(V(mst)))] <- NA
+V(mst)$size  <- 10
+V(mst)$label.size = 0.5
+V(mst)$label.dist = 1
+V(mst)$label.label.cex = 0.8
+V(mst)$label.degree = -pi
+E(mst)$width = 1.5
+LO <- layout_nicely(mst)
+plot(mst, vertex.label = labs, layout = LO)
+
+```
+```{r}
+by.cluster <- aggregateAcrossCells(sce.nest, ids=sce.nest$group2)
+centroids <- reducedDim(by.cluster, "PCA")
+
+# Set clusters=NULL as we have already aggregated above.
+mst <- TSCAN::createClusterMST(centroids, clusters=NULL)
+V(mst)$color <- c(as.character(mixed[levels(srt$group)][1:8]), "grey")
+labs <- names(V(mst))
+# labs[grepl("&", names(V(mst)))] <- NA
+V(mst)$size  <- 10
+V(mst)$label.size = 0.5
+V(mst)$label.dist = 1
+V(mst)$label.label.cex = 0.8
+V(mst)$label.degree = -pi
+E(mst)$width = 1.5
+LO <- layout_nicely(mst)
+plot(mst, vertex.label = labs, layout = LO)
+```
+
+```{r}
+pseudo.mnn <- TSCAN::quickPseudotime(sce.nest, use.dimred="PCA", with.mnn=TRUE, start = "AR")
+mnn.pseudo <- averagePseudotime(pseudo.mnn$ordering)
+
+plotUMAP(sce.nest, colour_by=I(mnn.pseudo), 
+        text_by="label", text_colour="red") +
+    geom_line(data=line.data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+```
+```{r}
+srt$pseudo <- I(common.pseudo)
+FeaturePlot(srt, "pseudo")
+```
+I(common.pseudo)
+```{r}
+saveRDS(I(common.pseudo), "TSCAN.pseudo.Rds")
+```
+
+## Slingshot
+
+```{r}
+library(slingshot)
+sce.sling <- slingshot(sce.nest, reducedDim='PCA', cluster = sce.nest$group,useNames = FALSE, start.clus = "AR")
+head(sce.sling$slingPseudotime_1)
+embedded <- embedCurves(sce.sling, "UMAP")
+embedded <- slingCurves(embedded)[[1]] # only 1 path.
+embedded <- data.frame(embedded$s[embedded$ord,])
+
+plotUMAP(sce.sling, colour_by="slingPseudotime_1") +
+    geom_path(data=embedded, aes(x=UMAP_1, y=UMAP_2), size=1.2)
+```
+
+The previous call to `slingshot()` assumed that all cells in the dataset were part of a single curve.
+
+```{r}
+sce.sling2 <- slingshot(sce.nest, cluster=colLabels(sce.nest), reducedDim='PCA', start.clus = "AR")
+pseudo.paths <- slingPseudotime(sce.sling2, )
+head(pseudo.paths)
+```
+
+```{r}
+
+reducedDim(sce.sling2, "UMAP") <- reducedDim(sce.nest, "UMAP")
+
+# Taking the rowMeans just gives us a single pseudo-time for all cells. Cells
+# in segments that are shared across paths have similar pseudo-time values in 
+# all paths anyway, so taking the rowMeans is not particularly controversial.
+shared.pseudo <- rowMeans(pseudo.paths, na.rm=TRUE)
+
+# Need to loop over the paths and add each one separately.
+gg <- plotUMAP(sce.sling2, colour_by=I(shared.pseudo))
+embedded <- embedCurves(sce.sling2, "UMAP")
+embedded <- slingCurves(embedded)
+for (path in embedded) {
+    embedded <- data.frame(path$s[path$ord,])
+    gg <- gg + geom_path(data=embedded, aes(x=UMAP_1, y=UMAP_2), size=1.2)
+}
+
+gg
+plotUMAP(sce.sling2, colour_by = "seurat_clusters")
+```
+
+We can use `slingshotBranchID()` to determine whether a particular cell is shared across multiple curves or is unique to a subset of curves (i.e., is located "after" branching). I
+
+```{r}
+curve.assignments <- slingBranchID(sce.sling2)
+table(curve.assignments)
+```
+
+## characterizing trajectories - DEA
+
+We use the `testPseudotime()` utility to fit a natural spline to the expression of each gene, allowing us to model a range of non-linear relationships in the data.We then perform an analysis of variance (ANOVA) to determine if any of the spline coefficients are significantly non-zero, i.e., there is some significant trend with respect to pseudotime.
+
+```{r}
+library(TSCAN)
+library(dplyr)
+library(data.table)
+pesudo <- list()
+for ( n in seq(ncol(tscan.pseudo))){
+  temp<- as.data.frame(TSCAN::testPseudotime(sce.nest, pseudotime=tscan.pseudo[,n])[[1]])
+ temp$SYMBOL <- rownames(temp)
+ pesudo[[colnames(tscan.pseudo)[n]]] <- temp[order(temp$p.value),]
+ sce.nest[[colnames(tscan.pseudo)[n]]] <- pathStat(tscan.pseudo)[,n]
+}
+
+show_pseudo <- rbindlist(pesudo, idcol = "path", )
+show_pseudo <- show_pseudo[!is.na(show_pseudo$p.value)&show_pseudo$p.value<0.05,]
+show_pseudo[order(show_pseudo$logFC, show_pseudo$p.value),]
+```
+
+This yields an interpretable summary of the overall direction of change in the `logFC` field above, complementing the more poweful spline-based model used to populate the `p.value` field. In contrast, the magnitude and sign of the spline coefficients cannot be easily interpreted.
+
+```{r}
+up.left <- lapply(pesudo, function(x){
+  temp <- x %>% filter(logFC < 0 & !is.na(p.value) &p.value <0.05) %>% arrange(logFC)
+  return(head(temp, 10))
+})
+```
+
+```{r fig.height=10, fig.width=5, warning=FALSE}
+
+for ( i in names(up.left)){
+  g <- plotExpression(sce.nest, features=up.left[[i]]$SYMBOL, 
+    x=i, colour_by="label")
+  print(g)
+}
+
+```
+
+```{r}
+up.right <- lapply(pesudo, function(x){
+  temp <- x %>% filter(logFC > 0 & !is.na(p.value) &p.value <0.05) %>% arrange(logFC)
+  return(head(temp, 10))
+})
+```
+
+```{r fig.height=10, fig.width=5, warning=FALSE}
+for ( i in names(up.right)){
+  g <- plotExpression(sce.nest, features=up.right[[i]]$SYMBOL, 
+    x=i, colour_by="label")
+  print(g)
+}
+```
+
+```{r fig.height=8, fig.width=5, warning=FALSE}
+for (i in names(pesudo)){
+  on.first.path <- !is.na(sce.nest[[i]])
+  upright <- pesudo[[i]] %>% filter(logFC > 0 & !is.na(p.value) &p.value <0.05) %>% arrange(logFC)
+p <- plotHeatmap(sce.nest[,on.first.path], order_columns_by=i, 
+    colour_columns_by="label", features=head(upright$SYMBOL, 50),
+    center=TRUE)
+print(p)
+}
+```
+
+### Changes between paths
+
+```{r fig.height=10, fig.width=5}
+# Subsetting to the desired cluster containing the branch point.
+keep <- colLabels(sce.nest) == 7
+sub.nest <- sce.nest[,keep]
+
+# Showing only the lines to/from our cluster of interest.
+line.data.sub <- line.data[grepl("^7--", line.data$edge) | grepl("--7$", line.data$edge),]
+ggline <- geom_line(data=line.data.sub, mapping=aes(x=tSNE_1, y=tSNE_2, group=edge))
+
+q <- list()
+for (i in names(pesudo)){
+   q[[i]] <-  plotTSNE(sub.nest, colour_by=i) + ggline
+}
+
+library(gridExtra)
+do.call("grid.arrange", c(q, ncol = 3))
+
+```
+
+```{r}
+sub_pseudo <- list()
+for ( i in names(pesudo)){
+  temp<- as.data.frame(TSCAN::testPseudotime(sub.nest, pseudotime=sub.nest[[i]], df = 1))
+ temp$SYMBOL <- rownames(temp)
+ sub_pseudo[[i]] <- temp[order(temp$p.value),]
+}
+```
+
+can look at DEG in interested paths that and are not significant and/or changing in the opposite direction in the other paths. but in our case, there is no interested path
+
+```{r eval=FALSE, include=FALSE}
+only3 <- pseudo3[which(pseudo3$FDR <= 0.05 & 
+    (pseudo2$p.value >= 0.05 | sign(pseudo1$logFC)!=sign(pseudo3$logFC)) &
+    (pseudo2$p.value >= 0.05 | sign(pseudo2$logFC)!=sign(pseudo3$logFC))),]
+only3[order(only3$p.value),]
+```
+
+## Finding the root
+
+### Entropy-based methods
+
+Trajectories are commonly used to characterize differentiation where branches are interpreted as multiple lineages. In this setting, the root of the trajectory is best set to the "start" of the differentiation process, i.e., the most undifferentiated state that is observed in the dataset. It is usually possible to identify this state based on the genes that are expressed at each point of the trajectory. However, when such prior biological knowledge is not available, we can fall back to the more general concept that undifferentiated cells have more diverse expression profiles (Gulati et al. [2020](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#ref-gulati2020singlecell)). The assumption is that terminally differentiated cells have expression profiles that are highly specialized for their function while multipotent cells have no such constraints - and indeed, may need to have active expression programs for many lineages in preparation for commitment to any of them.
+
+We quantify the diversity of expression by computing the entropy of each cell's expression profile (Grun et al. [2016](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#ref-grun2016denovo); Guo et al. [2017](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#ref-guo2017slice); Teschendorff and Enver [2017](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#ref-teschendorff2017singlecell)), with higher entropies representing greater diversity. We demonstrate on the Nestorowa HSC dataset (Figure [10.13](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#fig:entropy-nest)) where clusters 5 and 8 have the highest entropies, suggesting that they represent the least differentiated states within the trajectory. It is also reassuring that these two clusters are adjacent on the MST (Figure [10.1](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#fig:tscan-nest-tsne)), which is consistent with branched differentiation "away" from a single root.
+
+```{r}
+library(TSCAN)
+entropy <- perCellEntropy(sce.nest)
+ent.data <- data.frame(cluster=colLabels(sce.nest), entropy=entropy)
+ggplot(ent.data, aes(x=cluster, y=entropy)) + 
+    geom_violin() +
+    coord_cartesian(ylim=c(7, NA)) +
+    stat_summary(fun=median, geom="point")
+```
+
+cluster 11\>6\>13 are more likely to be the least differentiated states within the trajectory
+
+stemness-related markers in prostate cancer
+
+"ALDH1A1", "CA49", "CA151", "CA44", "CA133", "CA166", "BMI-1", "MYC", "SOX2", "OCT4", "KLF4", "SALL4", "REX1"
+
+```{r fig.height=7, fig.width=5}
+p1 <- DimPlot(tumor, label = T)
+p2 <- FeaturePlot(tumor, features = c("ALDH1A1",   "MYC", "SOX2",  "KLF4", "SALL4"))
+p1 
+p2
+
+```
+
+### RNA velocity
+
+Another strategy is to use the concept of "RNA velocity" to identify the root (La Manno et al. [2018](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html#ref-lamanno2018rna)). For a given gene, a high ratio of unspliced to spliced transcripts indicates that that gene is being actively upregulated, under the assumption that the increase in transcription exceeds the capability of the splicing machinery to process the pre-mRNA. Conversely, a low ratio indicates that the gene is being downregulated as the rate of production and processing of pre-mRNAs cannot compensate for the degradation of mature transcripts. Thus, we can infer that cells with high and low ratios are moving towards a high- and low-expression state, respectively, allowing us to assign directionality to any trajectory or even individual cells.

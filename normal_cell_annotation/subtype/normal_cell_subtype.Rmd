@@ -1,0 +1,1085 @@
+---
+title: "normal 2nd layer subtyping"
+output: html_notebook
+---
+
+
+# set up
+```{r set up, include=FALSE}
+library(ggsci)
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(pals)
+library(data.table)
+library(ggplot2)
+library(scran)
+library(simspec)
+library(harmony)
+library(MAST)
+library(scales)
+source("~/normal_cell_annotation/normal_markers.R")
+source("~/functions.R")
+```
+
+```{r all marker, fig.height=5, fig.width=25}
+final_normalsrt <- readRDS("~/normal_cell_annotation/subtype/final_normalsrt.Rds")
+DotPlot(final_normalsrt, features = all_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(final_normalsrt, features = all_marker, group.by = "cell_anno")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+DotPlot(final_normalsrt, features = all_feature, group.by = "cell_anno")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+# Tcell
+```{r T cell, fig.height=5, fig.width=10}
+Tcells <- readRDS("~/normal_cell_annotation/subtype/Tcells.Rds")
+Idents(Tcells) <- Tcells$harmony_cluster
+Tcells <- AddModuleScore(Tcells, tcell_marker)
+colnames(Tcells@meta.data)[grep("Cluster", colnames(Tcells@meta.data))] <- names(tcell_marker)
+DimPlot(Tcells, reduction = "harmony_umap", label = T)+DimPlot(Tcells, reduction = "harmony_umap", label = T, group.by = "azimuth_cluster")
+DotPlot(Tcells, features = tcell_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(Tcells, features = names(tcell_marker))
+DimPlot(Tcells, reduction = "harmony_umap", label = T, group.by = "cluster_anno")
+```
+```{r}
+fplot(Tcells, focused_T_cell_feature)
+fplot(Tcells, tcell_marker)
+```
+```{r azimuth bone marrow ref}
+Tcells <- plot_azimuth("azimuth_pred_tcell_bonemarrow.tsv", Tcells)
+
+DimPlot(Tcells, reduction = "harmony_umap", cells.highlight = colnames(Tcells)[Tcells$predicted.celltype.l2 == "CD8 Memory"])
+DimPlot(Tcells, reduction = "harmony_umap", cells.highlight = colnames(Tcells)[Tcells$predicted.celltype.l2 == "CD4 Naive"])
+```
+```{r}
+fplot(Tcells, features = list(CD4_mem = c("MAL", "TRAT1", "AP3M2", "CAMK4", "AQP3", "IL7R", "RCAN3", "BCL11B", "LEF1", "FLT3LG"),
+                              CD8_mem = c("CD8B", "CD8A", "GZMK", "IL7R", "BCL11B", "CD3E", "PIK3IP1", "CD6", "TRAC", "SPOCK2"),
+                              CD4_naive = c("SHZ2", "MAL", "CCR7", "CAMK4", "LEF1", "BCL11B", "FHIT", "RCAN3", "SH3YL1", "PIK3IP1"), 
+                              CD8_naive = c("NELL2", "CD8B", "S100B", "TRABD2A", "CCR7", "OXNAD1", "FLT3LG", "MAL", "LEF1", "CAMK4"),
+                              HSC = c("CRHBP", "AVP", "MYCT1", "BEX1", "NPR3", "CRYGD", "MSRB3", "CD34", "NPDC1", "MLLT3")
+
+))
+```
+```{r}
+Tcells$subtype <- "CD4 memory/naive cells"
+Tcells$subtype[Tcells$harmony_cluster %in% c(1, 0, 9)] <- "CD8 memory/naive cells"
+Tcells$subtype[Tcells$harmony_cluster %in% c(6)] <- "Treg"
+f1 <- coneraxes( DimPlot(Tcells, group.by = "subtype", reduction = "harmony_umap", cols = ggsci::pal_observable()(3)))+theme(legend.position = "bottom")
+f12 <- 
+```
+```{r}
+tcell_subtype <-  list(Treg = c("CTLA4" ,"IL2RA", "FOXP3", "RTKN2","IKZF2"), 
+                      CD8_effector = c("CD8A", "CD8B", "CCL5", "GZMK"),
+                      CD4_helper = c( "IL2", "TNF", "IL4R", "CD4"),
+                      CD4_mem = c( "BACH2", "RGS10", "SERINC5", "LEF1", "NELL2", "SELL", "TCF7","CAMK4", "IL7R"),
+                      CD8_mem = c("CD8B", "CD8A", "GZMK", "IL7R", "BCL11B", "CD3E", "PIK3IP1", "CD6", "TRAC", "SPOCK2"),
+                      NK_cell = c( "GZMB","NCAM1", "GNLY","NKG7",  "KLRF1", "FCGR3A", "FCER1G"))
+saveRDS(Tcells, "Tcells.Rds")
+```
+
+```{r}
+Tcells <- readRDS("~/normal_cell_annotation/subtype/Tcells.Rds")
+
+Tcells<- plot_cluster(Tcells)
+```
+```{r}
+DimPlot(Tcells, reduction = "harmony_umap", label = T, group.by = "seurat_clusters", repel = T)
+markers <- FindAllMarkers(Tcells, test.use = "MAST" , only.pos = T)
+df <- markers %>% filter(p_val_adj < 0.05) %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% 
+  print(df, n = 100)
+```
+
+
+```{r}
+Tcells$marker[Tcells$marker == "AL136456.1"] <- "IKZF2"
+Tcells$cluster_marker[Tcells$cluster_marker == "5:AL136456.1"] <- "5:IKZF2"
+Tcells$cluster_marker[Tcells$cluster_marker == "4:FP236383.3"] <- "4:unclassified"
+f3 <- coneraxes(DimPlot(Tcells, reduction = "harmony_umap", label = T, group.by = "cluster_marker", repel = T)+ggtitle("Cluster Marker")) 
+DimPlot(Tcells, reduction = "harmony_umap", label = T, group.by = "site", repel = T, cols = brewer.set3(9))
+
+```
+
+
+
+```{r fig.height=6, fig.width=3}
+f4 <- coneraxes( FeaturePlot(Tcells, unique(Tcells$marker)[1:7], reduction = "harmony_umap", cols = rev(brewer.rdylbu(10))))
+free(f3)/f4
+```
+````{r fig.height=3, fig.width=6}
+p3 <- barplot_bypatient(Tcells)
+p4 <- barplot_bytissue_byrow(Tcells)
+p3 + p4+ plot_layout(axes = "collect")
+```
+
+
+```{r fig.height=6, fig.width=10}
+vlnplot(Tcells, unique(Tcells$marker))
+```
+
+```{r}
+fplot(Tcells, features = unique(Tcells$marker))
+```
+```{r}
+fplot(Tcells, focused_T_cell_feature)
+```
+```{r}
+Idents(Tcells) <- Tcells$site
+markers2 <- FindAllMarkers(Tcells, test.use = "MAST", only.pos = T)
+markers2 <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers2, "Tcells_tissuemarker.Rds")
+print(markers2, n = 100)
+features <- markers2 %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+fplot(Tcells, features$gene)
+vlnplot(Tcells, features$gene, group = "site")
+saveRDS(Tcells, "Tcells.Rds")
+```
+
+# B cell
+```{r fig.width=12}
+Idents(Bcells) <- Bcells$harmony_cluster
+Bcells <- AddModuleScore(Bcells, bcell_marker)
+colnames(Bcells@meta.data)[grep("Cluster", colnames(Bcells@meta.data))] <- names(bcell_marker)
+DimPlot(Bcells, reduction = "harmony_umap", label = T)+DimPlot(Bcells, reduction = "harmony_umap", label = T, group.by = "azimuth_cluster")
+DotPlot(Bcells, features = bcell_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(Bcells, features = names(bcell_marker))
+DimPlot(Bcells, reduction = "harmony_umap", label = T, group.by = "cluster_anno")
+```
+```{r}
+fplot(Bcells, focused_B_cell_feature)
+fplot(Bcells, bcell_marker)
+```
+```{r}
+Bcells <- plot_azimuth("azimuth_pred_bcell_bonemarrow.tsv", Bcells)
+```
+```{r}
+Bcells$subtype <- "memory/naive B cells"
+Bcells$subtype[Bcells$harmony_cluster %in% c(3,5 )] <- "Plasma cells"
+Bcells$subtype[Bcells$harmony_cluster %in% c(6)] <- "Erythroid"
+DimPlot(Bcells, group.by = "subtype", reduction = "harmony_umap")
+saveRDS(Bcells, "Bcells.Rds")
+```
+```{r}
+Bcells <- readRDS("~/normal_cell_annotation/subtype/Bcells.Rds")
+Bcells <- plot_cluster(Bcells)
+```
+```{r}
+fplot(Bcells, unique(Bcells$marker))
+vlnplot(Bcells, unique(Bcells$marker))
+```
+```{r}
+Idents(Bcells) <- Bcells$site
+markers <- FindAllMarkers(Bcells, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Bcells_tissuemarker.Rds")
+features <- markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+DimPlot(Bcells, reduction = "harmony_umap", group.by = "site")
+fplot(Bcells, features$gene)
+vlnplot(Bcells, features$gene)
+saveRDS(Bcells, "Bcells.Rds")
+```
+
+```{r, fig.height=6, fig.width=13}
+markerlist <- list(plasma = c("CD38", "XBP1", "IGHGP"), 
+                   `memory/naive` = c("BANK1", "CD83", "MARCH1"), 
+                   erythroid = c("RHCE", "HBA2", "ANK1"))
+p1 <- DimPlot(Bcells, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)) + theme(legend.position = "bottom")
+p2 <- DotPlot(Bcells, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),axis.title.x=element_blank()) 
+p3 <- barplot_bypatient(Bcells)
+p4 <- barplot_bytissue_byrow(Bcells)
+
+p1+p2 +plot_layout(widths = c(1, 1.5))
+#1263x667
+
+```
+
+````{r fig.height=3, fig.width=7}
+p3 + p4+ plot_layout(axes = "collect")
+```
+
+```{r fig.height=8, fig.width=6}
+g1 <- DimPlot(Bcells, reduction = "harmony_umap", group.by = "site", cols = brewer.set3(9))
+g2 <- barplot_bytissue(Bcells)+NoLegend()
+Idents(Bcells) <- Bcells$site
+markers <- FindAllMarkers(Bcells, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Bcells_tissuemarker.Rds")
+
+features <- markers %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features$cluster <- as.character(features$cluster)
+features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
+group <- setNames(as.character(features$cluster), as.character(features$gene))
+g3 <- vlnplot(Bcells, features$gene[order(features$cluster)], group = group)
+
+
+layout <- "
+AAB
+CCC
+"
+features
+free(g1)+g2+g3+
+  plot_layout( design = layout, heights = c(1, 2))
+
+```
+
+
+```{r}
+barplot_bytissue(Bcells)
+DimPlot(Bcells, group.by = "site", cols = brewer.set3(9), reduction = "harmony_umap")
+```
+
+```{r}
+features
+fplot(Bcells, focused_B_cell_feature, "focus-B")
+```
+
+# Macrophage
+```{r}
+Macro <- readRDS("~/normal_cell_annotation/subtype/Macro.Rds")
+Idents(Macro) <- Macro$harmony_cluster
+Macro <- AddModuleScore(Macro, macro_marker)
+colnames(Macro@meta.data)[grep("Cluster", colnames(Macro@meta.data))] <- names(macro_marker)
+DimPlot(Macro, reduction = "harmony_umap", label = T)+DimPlot(Macro, reduction = "harmony_umap", label = T, group.by = "azimuth_cluster")
+DotPlot(Macro, features = macro_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(Macro, features = names(macro_marker))
+DimPlot(Macro, reduction = "harmony_umap", label = T, group.by = "cluster_anno")
+```
+```{r}
+fplot(Macro, focused_Macrophage_feature, title = "focused")
+fplot(Macro, M1_feature, title= "M1")
+fplot(Macro, M2_feature, title= "M2")
+fplot(Macro, Monocyte_feature, "Monocyte")
+fplot(Macro, Mast_feature, "Mast")
+fplot(Macro, list(mDC_feature, pDC_feature))
+fplot(Macro, macro_marker)
+```
+```{r}
+fplot(Macro, c("C1QB", "C1QA", "HLA-DRB1", "AIF1", "LYZ", "CTSZ", "CTSL", "FCER1G", "C1QC", "LAPTM5")
+)
+fplot(Macro, c("F13A1", "MRC1", "LGMN", "FTL", "CYBB", "RBPJ", "FRMD4B", "SCN9A", "CD163L1", "IQGAP2")
+)
+fplot(Macro, c("COL1A2", "COL1A1", "COL3A1", "SPARC", "COL6A2", "COL6A1", "COL6A3", "SPARCL1")
+)
+fplot(Macro, c("CD163", "CD206", "CD200R", "CD209", "CD301", "CCL1", "CCL17", "CCL18", "CCL22", "CCL24")
+)
+```
+```{r}
+macro_subtype <- list(macrophage = c("CD68", "C1QB", "KYNU", "CTSB", "MSR1", "TGFB1", "PLXDC2"),
+                      monocyte = c("CD14", "FCGR3A" , "CD68", "C1QC", "C1QA", "HLA-DPA1"),
+                     TRM = c("F13A1", "LYVE1", "CD163L1", "CD163", "MRC1"), 
+                     TAM = c("SPP1", "CD83", "CD109", "TM4SF19"))
+```
+
+```{r}
+Macro$subtype <- "Macrophage"
+Macro$subtype[Macro$harmony_cluster %in% c(3, 6, 11)] <- "TAM"
+Macro$subtype[Macro$harmony_cluster %in% c(1, 8, 2)] <- "TRM"
+Macro$subtype[Macro$harmony_cluster %in% c(6, 7)] <- "angio_TAM"
+DimPlot(Macro, group.by = "subtype", reduction = "harmony_umap")
+saveRDS(Macro, "Macro.Rds")
+```
+```{r}
+Macro <- readRDS("~/normal_cell_annotation/subtype/Macro.Rds")
+Macro <- plot_cluster(Macro)
+```
+```{r}
+Macro$marker[Macro$marker == "FP236383.3"] <- "CPM"
+Macro$cluster_marker[Macro$cluster_marker == "4:FP236383.3"] <- "4:CPM"
+Macro$cluster_marker[Macro$cluster_marker == "3:NA"] <- "3:unclassified"
+DimPlot(Macro, reduction = "harmony_umap", label = T, group.by = "cluster_marker", repel = T)
+FeaturePlot(Macro, unique(Macro$marker), reduction = "harmony_umap", cols = rev(brewer.rdylbu(10))) + plot_layout(axes = "collect", guides = "collect")
+
+
+```
+```{r fig.height=4, fig.width=9}
+DefaultAssay(Macro) <- "ruv3"
+Idents(Macro) <- "subtype"
+markers <- FindAllMarkers(Macro, test.use = "MAST", only.pos = T, min.diff.pct = 0.5, logfc.threshold = 1)
+markers <- markers%>% filter(p_val_adj < 0.05)
+markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1:10) %>% print()
+
+markerlist <- list( `angio\nTAM` = c("VCAN", "FCN1","MARCO","OLR1"), 
+                     TRM = c("F13A1", "LYVE1", "CD163L1"), 
+                     TAM = c("SPP1", "CD83", "CD109"))
+
+
+p1 <- DimPlot(Macro, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)) + theme(legend.position = "bottom")
+p2 <- DotPlot(Macro, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),axis.title.x=element_blank())
+
+
+p1+p2 +plot_layout(widths = c(1, 1.5))
+#1263x667
+
+```
+```{r fig.height=3, fig.width=7}
+p3 <- barplot_bypatient(Macro)
+p4 <- barplot_bytissue_byrow(Macro)
+p3 + p4+ plot_layout(axes = "collect")
+```
+```{r fig.height=8, fig.width=6}
+g1 <- DimPlot(Macro, reduction = "harmony_umap", group.by = "site", cols = brewer.set3(9))
+g2 <- barplot_bytissue(Macro)+NoLegend()
+Idents(Macro) <- Macro$site
+markers <- FindAllMarkers(Macro, test.use = "MAST", only.pos = T,min.diff.pct = 0.3, logfc.threshold = 0.5)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Macro_tissuemarker.Rds")
+
+features <- markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features$cluster <- as.character(features$cluster)
+features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
+group <- setNames(as.character(features$cluster), as.character(features$gene))
+g3 <- vlnplot(Macro, features$gene[order(features$cluster)], group)
+
+
+layout <- "
+AAB
+CCC
+"
+free(g1)+g2+g3+
+plot_layout( design = layout, heights = c(1, 2))
+```
+
+
+```{r}
+fplot(Macro, focused_Macrophage_feature, "focus_macro")
+fplot(Macro, unique(Macro$marker))
+```
+```{r fig.height=4, fig.width=10, warning=FALSE}
+vlnplot(Macro, unique(Macro$marker))
+```
+
+```{r message=FALSE, warning=FALSE}
+Idents(Macro) <- Macro$site
+markers <- FindAllMarkers(Macro, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Macro_tissuemarker.Rds")
+features <- markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features
+fplot(Macro, features$gene)
+vlnplot(Macro, features$gene)
+saveRDS(Macro, "Macro.Rds")
+```
+
+# Endothelial
+```{r}
+Endo <- readRDS("~/normal_cell_annotation/subtype/Endo1.Rds")
+Idents(Endo) <- Endo$harmony_cluster
+
+Endo <- AddModuleScore(Endo, endo_marker)
+colnames(Endo@meta.data)[grep("Cluster", colnames(Endo@meta.data))] <- names(endo_marker)
+DimPlot(Endo, reduction = "harmony_umap", label = T)
+DotPlot(Endo, features = endo_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(Endo, features = names(endo_marker))
+DimPlot(Endo, reduction = "harmony_umap", label = F, group.by = "cluster_anno")
+
+```
+
+```{r}
+DimPlot(Endo, reduction = "harmony_umap", cells.highlight = colnames(Endo)[Endo$old_cluster == "17"])
+```
+
+
+```{r}
+# Endo <- subset(Endo, cells = WhichCells(Endo, idents = "9", invert = T))
+# Endo <- preprocess_srt(Endo)
+# Endo <- subset(Endo, cells = WhichCells(Endo, idents = "4", invert = T))
+# Endo <- preprocess_srt(Endo)
+# 
+# DimPlot(Endo, reduction = "harmony_umap", label = T)+DimPlot(Endo, reduction = "harmony_umap", label = T, group.by = "azimuth_cluster")
+# DimPlot(Endo, reduction = "harmony_umap", label = T, group.by = "cluster_anno")
+# VlnPlot(Endo, features = names(endo_marker))
+```
+```{r}
+fplot(Endo, pericyte_feature, "pericyte")
+fplot(Endo, c("PECAM1", "CDH5", "VWF", "KDR", "FLT1", "TEK", "CLDN5"), "Pan")
+fplot(Endo, c("GJA4", "GJA5", "HEY1", "GATA2", "CXCR4", "SOX17", "MECOM"), "Artery")
+fplot(Endo, c("ACKR1", "NR2F2", "PLVAP"), "Vein")
+fplot(Endo, c("FCN3", "EPAS1", "RAMP3", "CDH5", "PODXL", "BTNL9", "IL7R", "CD81", "ATP6V0B", "THBD")
+)
+fplot(Endo, c("ACTA2", "S100A4", "CDH2", "VIM", "FAP"), "EndoMT")
+```
+```{r}
+endo_subtype <-  list(pan = c("PECAM1", "VWF", "KDR", "FLT1", "TEK", "CLDN5"), 
+                      tip_like = c("SLC45A4", "CXCR4", "IGFBP3", "ESM1"),
+                      capillary = c( "EPAS1", "RAMP3", "CDH5", "PODXL", "BTNL9"),
+                        arterial = c("GJA5", "FBLN5", "LTBP4", "SOX17"),
+                        vein = c("ACKR1", "SELP", "VCAM1", "NR2F2"),
+                        lymphatic = c("PKHD1L1", "STON2", "PDGFC", "PROX1"),
+                        liver_sinusoidal = c("ATRNL1", "OIT3", "FGF23", "DNASE1L3"), 
+                      EndoMT = c("ACTA2", "S100A4", "CDH2", "VIM", "FAP")
+)
+fplot(Endo, endo_subtype)
+Endo <- AddModuleScore(Endo, endo_subtype)
+colnames(Endo@meta.data)[grep("Cluster", colnames(Endo@meta.data))] <- names(endo_subtype)
+
+```
+```{r fig.height=8, fig.width=10}
+FeaturePlot(Endo, names(endo_subtype), reduction = "harmony_umap")
+DotPlot(Endo, features = endo_subtype)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+```
+
+
+```{r}
+Endo$subtype <- "Capillary Endothelial"
+# Endo$subtype[Endo$harmony_cluster %in% c(0, 5)] <- "tip-like Endothelial"
+Endo$subtype[Endo$harmony_cluster %in% c(7)] <- "Arterial Endothelial"
+Endo$subtype[Endo$harmony_cluster %in% c(6)] <- "Veinary Endothelial"
+Endo$subtype[Endo$harmony_cluster %in% c(4)] <- "Lymphatic Endothelial"
+Endo$subtype[Endo$harmony_cluster %in% c(5)] <- "Liver Sinusoidal"
+Endo$subtype[Endo$harmony_cluster %in% c(9)] <- "EndoMT"
+
+saveRDS(Endo, "Endo.Rds")
+DimPlot(Endo, reduction = "harmony_umap", group.by = "subtype")
+```
+```{r}
+Endo <- readRDS("~/normal_cell_annotation/subtype/Endo.Rds")
+Endo <- plot_cluster(Endo)
+```
+```{r, fig.height=6, fig.width=13}
+Idents(Endo) <- Endo$subtype
+subtypemarker <- FindAllMarkers(Endo, only.pos = T, min.diff.pct = 0.3, logfc.threshold = 0.5)
+subtypemarker%>% filter(p_val_adj < 0.05) %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1:4) %>% print( n=20)
+```
+
+
+```{r, fig.height=6, fig.width=13}
+markerlist <- list(`tip\nlike `= c("SLC45A4", "IGFBP3", "ESM1"),
+                    arterial = c("GJA5", "FBLN5", "LTBP4", "SOX17"), 
+                    vein = c( "VCAM1","TSHZ2","MCTP1"), 
+                    lymphatic = c("PKHD1L1", "STON2", "PDGFC"), 
+                    `liver\nsinusoidal` = c("ATRNL1", "OIT3", "FGF23", "DNASE1L3")) 
+p1 <- DimPlot(Endo, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)) + theme(legend.position = "bottom")
+p2 <- DotPlot(Endo, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),axis.title.x=element_blank()) 
+p3 <- barplot_bypatient(Endo)
+p4 <- barplot_bytissue_byrow(Endo)
+
+p1+p2 +plot_layout(widths = c(1, 1.5))
+#1263x667
+
+```
+````{r fig.height=3, fig.width=7}
+p3 + p4+ plot_layout(axes = "collect")
+```
+```{r fig.height=8, fig.width=6}
+g1 <- DimPlot(Endo, reduction = "harmony_umap", group.by = "site", cols = brewer.set3(9))
+g2 <- barplot_bytissue(Endo)+NoLegend()
+Idents(Endo) <- Endo$site
+markers <- FindAllMarkers(Endo, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Endo_tissuemarker.Rds")
+
+features <- markers %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features$cluster <- as.character(features$cluster)
+features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
+group <- setNames(as.character(features$cluster), as.character(features$gene))
+g3 <- vlnplot(Endo, features$gene[order(features$cluster)], group)
+
+
+layout <- "
+AAB
+CCC
+"
+features
+free(g1)+g2+g3+
+plot_layout( design = layout, heights = c(1, 2))
+
+```
+
+
+
+```{r}
+fplot(Endo, unique(Endo$marker))
+```
+```{r fig.height=6, fig.width=10, warning=FALSE}
+vlnplot(Endo, unique(Endo$marker))
+```
+```{r fig.height=6, fig.width=10,message=FALSE, warning=FALSE}
+Idents(Endo) <- Endo$site
+markers <- FindAllMarkers(Endo, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Endo_tissuemarker.Rds")
+features <- markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features
+fplot(Endo, features$gene)
+vlnplot(Endo, features$gene)
+saveRDS(Endo, "Endo.Rds")
+```
+```{r}
+barplot_bypatient(Endo)
+```
+
+
+# Epithelial
+
+```{r}
+Epi <- readRDS("~/normal_cell_annotation/subtype/Epi.Rds")
+Idents(Epi) <- Epi$harmony_cluster
+
+Epi <- AddModuleScore(Epi, epi_marker)
+colnames(Epi@meta.data)[grep("Cluster", colnames(Epi@meta.data))] <- names(epi_marker)
+DimPlot(Epi, reduction = "harmony_umap", label = T)+DimPlot(Epi, reduction = "harmony_umap", label = T, group.by = "azimuth_cluster")
+DotPlot(Epi, features = epi_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(Epi, features = names(epi_marker))
+DimPlot(Epi, reduction = "harmony_umap", label = T, group.by = "cluster_anno")
+```
+```{r}
+fplot(Epi, Epithelial_feature)
+fplot(Epi, c("SCGB3A2", "SFTPB", "CYB5A", "PIGR", "C16orf89", "CTSE", "KIAA1324", "CEACAM6", "WFDC2", "DSTN"), "club")
+fplot(Epi, c("SCGB3A1", "BPIFB1", "SLPI", "LCN2", "WFDC2", "SAA1", "SCGB1A1", "RARRES1", "MUC5B", "MSMB"), "mucous")
+fplot(Epi, c("KRT18", "KRT14","KRT5", "ACTA2", "MYLK", "KRT19" ,"SLPI", "ANKRD30A", "SYTL2"))
+```
+```{r}
+Epi <- plot_azimuth("azimuth_pred_epi_lungv1.tsv", Epi)
+```
+```{r}
+DimPlot(Epi, group.by = "site", reduction = "harmony_umap")
+DimPlot(Endo, group.by = "site", reduction = "harmony_umap")
+```
+```{r}
+Epi$subtype <- "Epithelial"
+Epi$subtype[Epi$harmony_cluster %in% c(0, 6)] <- "Basal Epithelial"
+Epi$subtype[Epi$harmony_cluster %in% c(1)] <- "Luminal Epithelial"
+Epi$subtype[Epi$harmony_cluster %in% c(7)] <- "Ciliated Epithelial"
+Epi$subtype[Epi$subtype == "Epithelial" & Epi$site == "lung"] <- "Aveoliar cell"
+Epi$subtype[Epi$subtype == "Epithelial" & Epi$site == "liver"] <- "Liver Epithelial"
+Idents(Epi) <- Epi$subtype
+markers <- FindAllMarkers(Epi)
+markers %>% filter(p_val_adj < 0.05) %>% filter(pct.1 > 0.2) %>% View()
+FeaturePlot(Epi, reduction = "harmony_umap", "PDE8B")
+```
+```{r}
+epi_marker <- list(basal = c("KRT5", "KRT15", "VAV3", "TP63", "TG"), 
+                   luminal = c("LMO7", "CLDN3", "ALDH1A3", "ALDH1A2"), 
+                   ciliated = c("ADCY2", "NR4A1", "PTPRN2"), 
+                   aveoliar = c("ITK", "DOCK2", "ABCA3", "SFTPB"), 
+                   liver_epi= c("TM4SF4" ,"LINC02532","KCNJ16","CCDC198","AC079790.1"))
+saveRDS(Epi, "Epi.Rds")
+DimPlot(Epi, reduction = "harmony_umap", group.by = "subtype")
+```
+```{r}
+Epi <- readRDS("~/normal_cell_annotation/subtype/Epi.Rds")
+Epi <- plot_cluster(Epi)
+```
+```{r}
+DefaultAssay(Epi) <- "ruv3"
+Idents(Epi) <- Epi$subtype
+subtypemarker <- FindAllMarkers(Epi, only.pos = T, min.diff.pct = 0.3, logfc.threshold = 0.5)
+subtypemarker%>% filter(p_val_adj < 0.05) %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1:4) %>% print( n=20)
+```
+
+```{r, fig.height=6, fig.width=13}
+markerlist <- list(basal = c("KRT5", "KRT15", "VAV3", "TP63", "TG"), 
+                   luminal = c("ROBO1", "CPA6", "ALDH1A2"), 
+                   ciliated = c("ADCY2", "NR4A1", "PTPRN2"), 
+                   aveoliar = c( "DOCK2", "ABCA3", "SFTPB"))
+p1 <- DimPlot(Epi, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)) + theme(legend.position = "bottom")
+p2 <- DotPlot(Epi, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),axis.title.x=element_blank()) 
+
+
+p1+p2 +plot_layout(widths = c(1, 1.5))
+#1263x667
+
+```
+#1263x667
+````{r fig.height=3, fig.width=7}
+p3 <- barplot_bypatient(Epi)
+p4 <- barplot_bytissue_byrow(Epi)
+p3 + p4+ plot_layout(axes = "collect")
+```
+
+
+```{r fig.height=8, fig.width=6}
+g1 <- DimPlot(Epi, reduction = "harmony_umap", group.by = "site", cols = brewer.set3(9))
+g2 <- barplot_bytissue(Epi)+NoLegend()
+Idents(Epi) <- Epi$site
+markers <- FindAllMarkers(Epi, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Epi_tissuemarker.Rds")
+
+features <- markers %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features$cluster <- as.character(features$cluster)
+features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
+group <- setNames(as.character(features$cluster), as.character(features$gene))
+
+g3 <- vlnplot(Epi, features$gene[order(features$cluster)], group)
+
+
+layout <- "
+AAB
+CCC
+"
+features
+free(g1)+g2+g3+
+  plot_layout( design = layout, heights = c(1, 2))
+
+```
+
+
+
+
+
+
+```{r}
+Epi$marker[Epi$marker == "FP236383.3"] <- "SLC4A4"
+Epi$cluster_marker[Epi$cluster_marker == "3:FP236383.3"] <- "3:SLC4A4"
+Epi$cluster_marker[Epi$cluster_marker == "2:FP236383.3"] <- "2:unclassified"
+DimPlot(Epi, reduction = "harmony_umap", label = T, group.by = "cluster_marker", repel = T)
+DimPlot(Epi, reduction = "harmony_umap", label = T, group.by = "site", repel = T, cols = brewer.set3(9))
+```
+```{r}
+fplot(Epi, Epithelial_feature)
+fplot(Epi, unique(Epi$marker))
+```
+```{r fig.height=4, fig.width=10, warning=FALSE}
+vlnplot(Epi, unique(Epi$marker))
+```
+```{r fig.height=6, fig.width=10,message=FALSE, warning=FALSE}
+Idents(Epi) <- Epi$site
+markers <- FindAllMarkers(Epi, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Epi_tissuemarker.Rds")
+features <- markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features
+fplot(Epi, features$gene)
+vlnplot(Epi, features$gene)
+saveRDS(Epi, "Epi.Rds")
+```
+
+# Fibroblast like cell
+```{r}
+Fibro <- readRDS("~/normal_cell_annotation/subtype/Fibro.Rds")
+Idents(Fibro) <- Fibro$harmony_cluster
+
+Fibro <- AddModuleScore(Fibro, fibro_marker)
+colnames(Fibro@meta.data)[grep("Cluster", colnames(Fibro@meta.data))] <- names(fibro_marker)
+DimPlot(Fibro, reduction = "harmony_umap", label = T)+DimPlot(Fibro, reduction = "harmony_umap", label = T, group.by = "azimuth_cluster")
+DotPlot(Fibro, features = fibro_marker)+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(Fibro, features = names(fibro_marker))
+DimPlot(Fibro, reduction = "harmony_umap", label = T, group.by = "cluster_anno")
+```
+```{r}
+fplot(Fibro, fibro_marker)
+fplot(Fibro, pericyte_feature, "pericyte")
+fplot(Fibro, Chondrocyte_feature, "chondrocyte")
+```
+
+```{r}
+fplot(Fibro, c("WT1", "STEAP1", "FGF7", "MEDAG", "OSR1", "CPXM1", "CCDC71L", "PTMA", "DMKN", "PPA1"), "Lipofibroblast")
+fplot(Fibro, c("SCX", "CNN1", "FAM150A", "PDLIM7", "HSPB3", "MYLK", "RAMP1", "SCUBE1", "CSDC2", "TBC1D10A"), "SM")
+fplot(Fibro, c("COX4I2", "PDGFRB", "CALD1", "TACC1", "COL4A1", "NID1", "COL4A2", "LAMC3", "PTN", "KCNK3"), "Pericyte Az")
+fplot(Fibro, pericyte_feature, "Peri")
+fplot(Fibro, c("COL1A1", "COL1A2", "COL3A1", "ASPN", "LTBP1", "COL6A3", "ITGBL1", "COL12A1", "CTHRC1", "TGFBI"), "Myofibroblast")
+# Adipose Azimuth
+fplot(Fibro, c("GPAM", "ADIPOQ", "ACACB", "PCDH9", "GHR", "TRHDE", "SORBS1", "PLIN1", "PDE3B", "WDPCP"), "Adipocyte")
+fplot(Fibro, c("MYH11", "TAGLN", "ADGRL3", "SORBS2", "RCAN2", "MYOCD", "LMOD1", "CARMN", "CALD1", "RGS6"), "Smooth muscle")
+fplot(Fibro, c("COL25A1", "POSTN", "DLC1", "STEAP4", "MYO1B", "RGS5", "EBF2", "THSD7B", "KCNAB1", "RGS6"), "Pericyte")
+```
+
+```{r}
+Fibro <- plot_azimuth("azimuth_pred_fibro_lungv1.tsv", Fibro)
+```
+```{r}
+Fibro$lungv1 <- Fibro$predicted.celltype.l2
+Fibro$lungv1_anno <- Fibro$azimuth_cluster
+Fibro <- plot_azimuth("azimuth_pred_fibro_adipose.tsv", Fibro)
+```
+```{r}
+fibro_subtype<- list(smooth_muscle = c("ACTA2", "MYH11", "SORBC2", "ADGRL3", "MYOCD"), 
+                     pericyte = c("PDGFRB", "ABCC9", "RGS5", "GJC1", "ADCY3", "NOTCH3", "EBF2"), 
+                     chondrocyte = c("IBSP", "SATB2", "INSC"), 
+                     myofibroblast = c("ITGBL1", "COL12A1", "CTHRC1","POSTN"), 
+                     adipose = c("PCDH9", "TRHDE", "PDE3B"))
+```
+
+```{r}
+Fibro$subtype <- "Fibroblast"
+Fibro$subtype[Fibro$harmony_cluster %in% c(5,6)] <- "Smooth Muscle"
+Fibro$subtype[Fibro$harmony_cluster %in% c(4, 8)] <- "Pericyte"
+Fibro$subtype[Fibro$harmony_cluster %in% c(9,12)] <- "Chondrocyte"
+Fibro$subtype[Fibro$harmony_cluster %in% c(0, 2)] <- "Myofibroblast"
+Fibro$subtype[Fibro$harmony_cluster %in% c(1)] <- "Adipose"
+
+saveRDS(Fibro, "Fibro.Rds")
+DimPlot(Fibro, reduction = "harmony_umap", group.by = "subtype")
+```
+
+```{r}
+Fibro <- readRDS("~/normal_cell_annotation/subtype/Fibro.Rds")
+Fibro <- plot_cluster(Fibro)
+```
+```{r fig.height=6, fig.width=10, warning=FALSE}
+vlnplot(Fibro, unique(Fibro$marker))
+```
+
+```{r}
+fplot(Fibro, Fibroblast_feature)
+fplot(Fibro, unique(Fibro$marker))
+DimPlot(Fibro, reduction = "harmony_umap", label = T, group.by = "site", repel = T, cols = brewer.set3(9))
+```
+
+```{r}
+DefaultAssay(Fibro) <- "ruv3"
+Idents(Fibro) <- Fibro$subtype
+subtypemarker <- FindAllMarkers(Fibro, only.pos = T, min.diff.pct = 0.3, logfc.threshold = 0.5)
+subtypemarker%>% filter(p_val_adj < 0.05) %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1:4) %>% print( n=30)
+```
+
+
+```{r, fig.height=6, fig.width=13}
+markerlist <- list(adipose =c("LSAMP", "TRPC4", "DACH1"),
+                   chondrocyte = c("IBSP", "SATB2","CD36"), 
+                   myofibroblast = c("COL3A1", "COL6A3","VCAN"),
+                   pricyte= c("ADAMTS9","DLC1","EBF1"),
+                  `smooth\nmuscle` = c("ACTA2", "MYH11", "CNN1")
+                   )
+
+p1 <- DimPlot(Fibro, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)) + theme(legend.position = "bottom")
+p2 <- DotPlot(Fibro, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),axis.title.x=element_blank()) 
+p3 <- barplot_bypatient(Fibro)
+p4 <- barplot_bytissue_byrow(Fibro)
+
+p1+p2 +plot_layout(widths = c(1, 1.5))
+#1263x667
+
+```
+#1263x667
+````{r fig.height=3, fig.width=7}
+p3 + p4+ plot_layout(axes = "collect")
+```
+
+
+```{r fig.height=8, fig.width=6}
+g1 <- DimPlot(Fibro, reduction = "harmony_umap", group.by = "site", cols = brewer.set3(9))
+g2 <- barplot_bytissue(Fibro)+NoLegend()
+Idents(Fibro) <- Fibro$site
+markers <- FindAllMarkers(Fibro, test.use = "MAST", only.pos = T)
+markers <- markers%>% filter(p_val_adj < 0.05)
+saveRDS(markers, "Fibro_tissuemarker.Rds")
+
+features <- markers %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+features$cluster <- as.character(features$cluster)
+features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
+group <- setNames(as.character(features$cluster), as.character(features$gene))
+g3 <- vlnplot(Fibro, features$gene[order(features$cluster)], group = group)
+
+
+layout <- "
+AAB
+CCC
+"
+features
+free(g1)+g2+g3+
+  plot_layout( design = layout, heights = c(1, 2))
+
+```
+
+
+# final integration 
+```{r}
+library(ruvIIInb)
+library(scater)
+library(scran)
+library(scuttle)
+library(edgeR)
+library(SingleR)
+library(celldex)
+library(hrbrthemes)
+library(tidyverse)
+library(ggplot2)
+library(uwot)
+library(scMerge)
+library(Seurat)
+library(randomcoloR)
+library(dittoSeq)
+library(pheatmap)
+library(gridExtra)
+library(igraph)
+library(DelayedArray)
+library(simspec)
+library(dplyr)
+library(patchwork)
+library(RColorBrewer)
+library(harmony)
+```
+ 
+```{r}
+normal_integratedsrt <- readRDS("~/normal_cell_annotation/normal_integratedsrt.Rds")
+```
+
+```{r}
+DimPlot(normal_integratedsrt, group.by = "css_cluster", reduction = "css_umap", label = T)
+```
+
+```{r}
+normal3 <- readRDS("~/normal_cell_annotation/normal_integratedsrt.Rds")
+```
+
+
+```{r}
+cell_anno <- as.character(normal3$seurat_clusters)
+cell_anno[colnames(Fibro)] <- "Fibroblast-like cells"
+cell_anno[colnames(Macro)] <- "Macrophages"
+cell_anno[colnames(Epi)] <- "Epithelial cells"
+cell_anno[colnames(Tcells)] <- "T cells"
+cell_anno[colnames(Bcells)] <- "B cells"
+cell_anno[colnames(Neuro)] <- "Neurons"
+cell_anno[colnames(Hepo)] <- "Hepotocytes"
+cell_anno[colnames(Endo)] <- "Endothelial cells"
+normal3$layer1 <- cell_anno
+
+DimPlot(normal3, group.by = "layer1", reduction = "css_umap", label = T)
+
+```
+
+```{r}
+# normal3 <- subset(normal_integratedsrt, cells = colnames(normal_integratedsrt)[nchar(normal_integratedsrt$layer1)>2])
+# DimPlot(normal3, group.by = "Cell.Identity.new", reduction = "css_umap", label = F) + NoLegend()
+```
+```{r include=FALSE}
+# normal3 <- preprocess_srt(normal3)
+# data(Hs.schk)
+# 
+# samples <- normal3$sample
+# temp <- structure(seq(length(unique(samples))), names = unique(samples))
+# batch <- temp[samples]
+# ctl <- as.character(Hs.schk)
+# ind<-rownames(normal3) %in% ctl
+# 
+# M <- matrix(0,ncol(normal3),length(unique(normal3$layer1)))
+# colnames(M) <- unique(normal3$layer1)
+# cl<- unique(normal3$layer1)
+# for(CL in cl){
+#   M[which(normal3$layer1==CL),CL] <- 1
+# }
+# 
+# ruv3nb_out<-try(ruvIIInb::fastruvIII.nb(Y=DelayedArray(as.array(normal3@assays$RNA@counts)), # count matrix with genes as rows and cells as columns
+#                                         M=M, #Replicate matrix constructed as above
+#                                         ctl=ind, #A vector denoting control genes
+#                                         k=2, # dimension of unwanted variation factors
+#                                         ncores = 1,
+#                                         batch = batch
+# ))
+# #saveRDS(ruv3nb_out, paste0("~/integration/2024_06/tumor_normal_ruvout.Rds"))
+# logPAC <- as(log(get.res(ruv3nb_out,
+#                          type = "quantile", batch = ruv3nb_out$batch) + 1), "sparseMatrix")
+# rownames(logPAC) <- rownames(ruv3nb_out$counts)
+# colnames(logPAC) <- colnames(ruv3nb_out$counts)
+# 
+# 
+# normal3[["ruv3"]]<- CreateAssayObject(data = logPAC)
+# DefaultAssay(normal3) <-"ruv3"
+# normal3[["ruv3"]]@scale.data <- as.matrix(normal3[["ruv3"]]@data)
+# normal3 <- FindVariableFeatures(normal3)
+# normal3 <- normal3 %>%
+#   RunPCA(features = VariableFeatures(normal3), reduction.name = "ruv") %>%
+#   FindNeighbors(dims = 1:20, graph.name = c("ruv_nn", "ruv_snn"), reduction = "ruv") %>%
+#   FindClusters(resolution = 1, graph.name = "ruv_snn") %>%
+#   RunUMAP(dims = 1:20, reduction.name = "ruv_umap", reduction = "ruv")
+# saveRDS(normal3, "final_normalsrt.Rds")
+```
+
+
+```{r harmony}
+DimPlot(normal3, reduction = "harmony_umap", group.by = "layer1")
+DimPlot(normal3, reduction = "harmony_umap", group.by = "harmony_cluster", label = T)
+
+```
+```{r fig.height=6, fig.width=10}
+cell_anno <- as.character(normal3$layer1)
+cell_anno[colnames(Fibro)] <- Fibro$subtype
+cell_anno[colnames(Macro)] <- Macro$subtype
+cell_anno[colnames(Epi)] <- Epi$subtype
+cell_anno[colnames(Tcells)] <- Tcells$subtype
+cell_anno[colnames(Bcells)] <- Bcells$subtype
+cell_anno[colnames(Neuro)] <- "Neurons"
+cell_anno[colnames(Hepo)] <- "Hepotocytes"
+cell_anno[colnames(Endo)] <- Endo$subtype
+normal3$layer2 <- cell_anno
+
+DimPlot(normal3, reduction = "css_umap", group.by = "layer2")
+for(i in unique(normal3$layer2)){
+  f <- DimPlot(normal3, reduction = "css_umap", cells.highlight = colnames(normal3)[normal3$layer2 == i], sizes.highlight = 0.8) + ggtitle(i)
+  print(f)
+}
+```
+```{r}
+normal3$cell_anno <- normal3$layer1
+normal3$cell_anno[normal3$css_cluster %in% c(3)] <-"Endothelial cells"
+normal3$cell_anno[normal3$cell_anno == "Fibroblast-like cells"] <-"Fibroblasts"
+normal3$cell_anno[normal3$css_cluster %in% c(0)] <-"T cells"
+normal3$cell_anno[normal3$css_cluster %in% c(16)] <-"Neurons"
+normal3$cell_anno[normal3$css_cluster %in% c(4, 18)] <-"Epithelial cells"
+
+normal3$cell_anno[normal3$css_cluster %in% c(10)] <- "Chondrocytes"
+normal3$cell_anno[normal3$css_cluster %in% c(13)] <- "Plasma cells"
+normal3$cell_anno[normal3$css_cluster %in% c(15)] <- "Lymphatic endothelial cells"
+normal3$cell_anno[normal3$css_cluster %in% c(17)] <- "EndoMT"
+normal3$cell_anno[normal3$css_cluster %in% c(8)] <- "Pericytes"
+normal3$cell_anno[normal3$css_cluster %in% c(6)] <- "Adipocytes"
+
+normal3$cell_anno <- factor(normal3$cell_anno, levels =  c("T cells","B cells","Plasma cells","Macrophages",  "Neurons","Hepotocytes" ,"Epithelial cells","Endothelial cells", "Lymphatic endothelial cells","EndoMT", "Fibroblasts","Adipocytes" ,"Pericytes", "Chondrocytes"))
+f1 <- DimPlot(normal3, reduction = "css_umap", group.by = "cell_anno", cols = brewer.set1(14))+ggtitle("")
+saveRDS(f1, "plot_obj/dimplot.Rds")
+f1
+DimPlot(normal3, reduction = "css_umap", group.by = "cell_anno", cols = brewer.set1(14), label = T, repel =  T) + NoLegend()
+```
+
+
+```{r fig.height=8, fig.width=10, paged.print=TRUE}
+embed <- normal3@reductions$css_umap@cell.embeddings
+embed <- as.data.frame(embed)
+embed$layer2 <- normal3$layer2
+
+cell_anno <- unique(Fibro$subtype)
+cell_anno <- c(cell_anno, unique(Macro$subtype))
+cell_anno <- c(cell_anno, unique(Tcells$subtype))
+cell_anno <- c(cell_anno, unique(Bcells$subtype))
+cell_anno <- c(cell_anno, unique(Epi$subtype))
+cell_anno <- c(cell_anno, unique(Endo$subtype))
+cell_anno <- c(cell_anno, "Neurons")
+cell_anno <- c(cell_anno, "Hepotocytes")
+library(wesanderson)
+library(pals)
+colors <- c(brewer.set1(6), brewer.set2(4), wes_palette("GrandBudapest1", n = 3), wes_palette("FantasticFox1", n = 3), brewer.dark2(6), brewer.accent(5), "purple", "navy")
+
+embed$layer2 <- factor(embed$layer2, levels = cell_anno)
+
+ggplot(embed, aes(x=cssumap_1, y = cssumap_2, color = layer2)) + geom_point(size = 0.8)+
+  scale_colour_manual(values = colors) + theme_classic() + 
+  theme(legend.position = "bottom")+
+  guides(col = guide_legend(nrow = 6))
+
+```
+
+
+
+
+```{r}
+Idents(normal3) <- normal3$cell_anno
+markers <- FindAllMarkers(normal3, min.diff.pct = 0.3, only.pos = T)
+markers %>% filter(p_val_adj <0.05) %>% filter(avg_log2FC > 0.5) %>% group_by(cluster) %>% arrange(desc(avg_log2FC))
+```
+```{r}
+f <- DimPlot(normal3, reduction = "css_umap", label = T, group.by = "css_cluster")
+print(f)
+normal3 <- FindClusters(normal3, resolution = 0.5, graph.name = "css_snn")
+DefaultAssay(normal3) <- "ruv3"
+markers <- FindAllMarkers(normal3, test.use = "MAST" , only.pos = T)
+f <- DimPlot(normal3, reduction = "css_umap", label = T)
+print(f)
+df <- markers %>% filter(p_val_adj < 0.05) %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1:5)
+print(df)
+marker <- df %>% group_by(cluster) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
+normal3$cluster_marker <- paste(normal3$seurat_clusters, marker$gene[match(normal3$seurat_clusters, marker$cluster)], sep = ":")
+normal3$marker <- marker$gene[match(normal3$seurat_clusters, marker$cluster)]
+f <- DimPlot(normal3, reduction = "css_umap", label = T, group.by = "cluster_marker", repel = T)
+print(f)
+```
+
+
+```{r}
+DefaultAssay(normal3) <- "ruv3"
+anno_marker <- list(
+Tcell= c("CD247", "CD4", "CD8A"), #"SKAP1"
+Bcell = c("CD19","BANK1", "CD83", "MS4A1"),
+Plasma= c("CD38","PDK1","FKBP11", "JCHAIN", "SDC1"),
+Macrophage = c("CD86","CD163","FMN1"),
+Neuron = c( "NRXN1", "CADM2", "CSMD1"),#"KCNIP4"
+Hepo = c( "CP", "ALB", "SORBS2"),
+Epithelial = c("WFDC2","EPCAM", "EHF", "TMC5"), 
+Endothelial = c( "VWF", "FLT1",  "BTNL9"), 
+LymEndo = c("PKHD1L1", "CD36", "PROX1"), 
+# Fibrobast = c("LAMA2","PRKG1" ,"CALD1","LHFPL6"),
+Fibrobast = c("LAMA2","DCN", "LUM", "CFD"),
+Adipose =  c("LSAMP","MIR99AHG","TRPC4", "KAZN"),
+# Adipose =  c("MIR99AHG","FATP1", "PAT2", "NRG4", "P2RX4"),
+
+Pericyte = c("ABCC9", "RGS5","EBF2"),
+Chondrocyte = c("IBSP", "SATB2", "INSC")
+)
+
+# fplot(normal3, features = anno_marker, reduction = "css_umap")
+
+```
+
+```{r fig.height=7, fig.width=23}
+f2 <- DotPlot(normal3, features = all_marker, group.by = "cell_anno")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+saveRDS(f2, "plot_obj/dotplot.Rds")
+DotPlot(normal3, features = anno_marker, group.by = "cell_anno")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+f2 
+```
+```{r}
+Idents(normal3) <- normal3$cell_anno
+markers <- FindAllMarkers(normal3, min.diff.pct = 0.3, only.pos = T)
+```
+
+
+```{r}
+saveRDS(normal3, "final_normalsrt.Rds")
+```
+
+```{r}
+
+df <- normal3@meta.data %>% group_by(patient, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+df$cell_anno <- factor(df$cell_anno, levels = unique(normal3$cell_anno))
+df$cell_anno <- factor(df$cell_anno, levels = as.character(unique(df$cell_anno)))
+df$pathology <- ifelse(df$patient %in% c("CA0090", "CA0046"), "NE", ifelse(df$patient %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+df$patient <- gsub("00", "", df$patient)
+
+df$cell_type <- ifelse(df$cell_anno%in% c("T cells","B cells","Plasma cells",  "Macrophages"), "immune cells", "stromal cells")
+
+ggplot(df, aes(x = patient, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+   theme_bw()+ 
+  scale_fill_manual(values =brewer.set1(14))
+```
+```{r}
+normal3$cell_type <- ifelse(normal3$cell_anno%in% c("T cells","B cells","Plasma cells",  "Macrophages"), "immune cells", "stromal cells")
+normal3$pathology <- ifelse(normal3$patient %in% c("CA0090", "CA0046"), "NE", ifelse(normal3$patient %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+```
+
+
+```{r fig.height=4, fig.width=5}
+df <- normal3@meta.data %>% group_by(pathology,cell_type ) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+p <- ggplot(df, aes(x = pathology, y = freq, fill = cell_type)) + geom_bar(stat = "identity") + 
+   theme_bw() + scale_fill_manual(values = c("tomato", "royalblue1"), name = "cell type")
+df <- normal3@meta.data %>% group_by(pathology,cell_anno ) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+g <- ggplot(df, aes(x = pathology, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+   theme_bw() + theme(legend.position = "none")+
+  scale_fill_manual(values =brewer.set1(14), name = "Annotation")
+saveRDS(p+g, "plot_obj/pathology.Rds")
+g+p
+```
+```{r fig.height=5, fig.width=5}
+df <- normal3@meta.data %>% group_by(site,cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+f3 <- ggplot(df, aes(x = site, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+   theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values =brewer.set1(14))
+saveRDS(f3, "plot_obj/site.Rds")
+f3
+```
+```{r fig.height=4, fig.width=7}
+df <- normal3@meta.data %>% group_by(patient,site,sample, cell_anno) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
+
+df$pathology <- ifelse(df$patient %in% c("CA0090", "CA0046"), "NE", ifelse(df$patient %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+df$patient <- gsub("00", "", df$patient)
+df
+xlab <- setNames(df$site, df$sample)
+xlab <- paste(xlab, sapply(strsplit(names(xlab), split = "_"), function(x) tail(x, 1)))
+xlab <- setNames(xlab, df$sample)
+
+f4 <- ggplot(df, aes(x = sample, y = freq, fill = cell_anno)) + geom_bar(stat = "identity") + 
+  facet_grid(.~pathology+patient, scales = "free", space = "free") + 
+   theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+
+  scale_fill_manual(values =brewer.set1(14) )+
+  scale_x_discrete(labels= xlab)
+saveRDS(f4, "plot_obj/sample.Rds")
+f4
+```
+
+
+```{r}
+
+
+```
+
