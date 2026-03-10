@@ -1,0 +1,12 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.pdf
+.html
+.png
+.Rds
+.gz
+.txt
+.xlsx
+**/bin/

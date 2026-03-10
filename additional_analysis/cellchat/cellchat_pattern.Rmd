@@ -1,0 +1,895 @@
+---
+title: "cellchat_pattern"
+output: html_document
+date: "2026-01-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.height = 12, fig.width = 12)
+library(Seurat)
+library(ggplot2)
+library(CellChat)
+library(patchwork)
+library(data.table)
+library(dplyr)
+library(circlize)
+library(ComplexHeatmap)
+library(pals)
+library(ggpubr)
+library(psych, lib.loc = "~/R_Library/4.5")
+source("~/snRNA/functions.R")
+setwd("~/snRNA/cellchat")
+source("~/snRNA/genelist.R")
+source("~/snRNA/cols.R")
+```
+
+# normal srt number cell anno counts
+```{r}
+final_normalsrt <- readRDS("~/snRNA/tumour_normal/final_normalsrt.Rds")
+normal_cols <- setNames(brewer.set1(14), levels(final_normalsrt$cell_anno))
+final_normalsrt$group <- ifelse( final_normalsrt$patient %in% c("CA0090", "CA0046")|grepl("CA0058_liver", final_normalsrt$sample), "NE+", "AR+")
+df <- final_normalsrt@meta.data %>% group_by(group, sample, cell_anno) %>% summarise(n = n())
+my_comparisons <- list(c("AR+", "NE+"))
+ggplot(df, aes(x = group, y = n, fill = cell_anno)) +
+  geom_boxplot() +
+  facet_wrap(.~cell_anno, scales = "free_y")+
+  theme_classic()+
+  scale_fill_manual(values = normal_cols)+
+  theme(legend.position = "none") +
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     label.x = 1.5,
+                     label.y.npc = 0.8)+
+  labs(y = "Number of cell (n)", x = NULL) 
+ggsave("celltype number in different group.pdf", height = 4, width = 6)
+cellcountdf <- df
+```
+```{r fig.height=6, fig.width=4}
+unique(final_normalsrt$cell_anno)
+final_normalsrt$class <- ifelse( final_normalsrt$patient %in% c("CA0090", "CA0046"), "NE", ifelse(final_normalsrt$patient %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+final_normalsrt$cell_class <- ifelse(final_normalsrt$cell_anno %in% c("Macrophages", "T cells", "B cells", "Plasma cells"), "Immune", "Stroma")
+
+df <- final_normalsrt@meta.data %>% group_by(class, sample, cell_class) %>% summarise(n = n()) %>% mutate(prop = n/sum(n))
+my_comparisons <- list(c("AD", "NE"), c("AD", "Mixed"), c("Mixed", "NE"))
+g <- ggplot(df%>% filter(cell_class == "Immune"), aes(x = class, y = prop, fill = cell_class)) +
+  geom_boxplot() +
+  facet_wrap(.~cell_class)+
+  theme_classic(base_size = 17)+
+  scale_fill_manual(values = c("gold", "lightblue"))+
+  theme(legend.position = "none") +
+  stat_compare_means(aes(group = cell_class),
+                     method = "wilcox.test", 
+                    label = "p.signif", 
+                    comparisons = my_comparisons)+
+  labs(y = "Number of cell (n)", x = NULL) 
+
+g2 <- ggplot(df%>% filter(cell_class == "Stroma"), aes(x = class, y = prop, fill = cell_class)) +
+  geom_boxplot() +
+  facet_wrap(.~cell_class)+
+  theme_classic(base_size = 17)+
+  scale_fill_manual(values = c("lightblue"))+
+  theme(legend.position = "none") +
+  stat_compare_means(aes(group = cell_class),
+                     method = "wilcox.test", 
+                    label = "p.signif", 
+                    comparisons = my_comparisons)+
+  labs(y = "Number of cell (n)", x = NULL) 
+g/g2 + plot_layout(axes = "collect")
+ggsave("histology group vs cell group.pdf", height = 6, width = 4)
+```
+
+```{r}
+VlnPlot(final_normalsrt, c("NRXN3"), group.by = "cell_anno")
+FeaturePlot(final_normalsrt, "COL1A1") + DimPlot(final_normalsrt, group.by = "cell_anno")
+```
+
+# Annotation
+```{r}
+cns <-  gsub(".Rds", "", list.files("enrichedpathway", pattern = "[0-9+].Rds"))
+# clean_module <- readRDS("~/CosMx/clean_module.Rds")
+# names(clean_module) <- c("AR", "Inflammation", "NE1", "NE2", "Cycling", "Glycolysis")
+# srt <- readRDS("~/snRNA/integration/tumor_only_ruvsrt.Rds")
+# srt <- AddModuleScore(srt, features = clean_module, assay = "ruv3")
+# colnames(srt@meta.data)[grep("Cluster",colnames(srt@meta.data))] <- paste(names(clean_module), "Module")
+# srt$FOLH1 <- as.numeric(srt@assays$ruv3@data["FOLH1", ])
+# srt$AR <- as.numeric(srt@assays$ruv3@data["AR", ])
+# 
+# srt <- AddModuleScore(srt, features = genelist, assay = "ruv3")
+# colnames(srt@meta.data)[grep("Cluster",colnames(srt@meta.data))] <- names(genelist)
+# 
+# saveRDS(srt@meta.data, "~/snRNA/integration/tumour_only_meta.Rds")
+# meta <- srt@meta.data
+meta <- readRDS("~/snRNA/integration/tumour_only_meta.Rds")
+groups <- ifelse( substr(cns,1,6) %in% c("CA0090", "CA0046"), "NE", 
+                  ifelse( substr(cns,1,6) %in% c("CA0027", "CA0058"), "Mixed", "AD"))
+patients <- gsub("00", "", substr(cns,1,6))
+sites <- cns
+sites[grep("brain", sites)] <- "brain"
+sites[grep("dura", sites)] <- "dura"
+sites[grep("prostate", sites)] <- "prostate"
+sites[grep("liver", sites)] <- "liver"
+sites[grep("fat", sites)] <- "fat"
+sites[grep("lymph|hilar", sites)] <- "LN"
+sites[grep("rib|vertebra", sites)] <- "bone"
+sites[grep("lung", sites)] <- "lung"
+sites[grep("abdomen", sites)] <- "abdomen"
+sites[grep("bladder", sites)] <- "bladder"
+avg_expression <- meta %>% group_by(sample) %>% summarise(AR = mean(AR), FOLH1 = mean(FOLH1))
+
+module_score <- meta[, c( paste(names(clean_module), "Module"))]
+module_score <- split(module_score, meta$sample)
+avg_exp <- lapply(module_score, colMeans)
+
+signature_score <- meta[, names(genelist)]
+signature_score <- split(signature_score, meta$sample)
+avg_signature <- lapply(signature_score, colMeans)
+
+```
+
+```{r heatmap annotation}
+
+AR_signature = as.numeric(sapply(avg_signature[cns], '[',"AR_signature"))
+NE_signature  =  as.numeric(sapply(avg_signature[cns], '[',"NE_signature"))
+ha = HeatmapAnnotation(patient = patients, 
+                        site = sites, 
+                        group = groups, 
+                        AR_signature = as.numeric(sapply(avg_signature[cns], '[',"AR_signature")), 
+                       NE_signature  =  as.numeric(sapply(avg_signature[cns], '[',"NE_signature")), 
+                        col = list(patient = setNames(brewer.set1(9), unique(patients)),
+                                   site = setNames(brewer.set3(9), unique(sites)), 
+                                   group = setNames(c("indianred", "seagreen","steelblue2"), c("AD", "Mixed", "NE")),
+                                   AR_signature = colorRamp2(c(-0.3, 0.8), c( "white", "dodgerblue3")),
+                                   NE_signature = colorRamp2(c(0, 0.5), c( "white", "#E7298A"))))
+
+ha2 = HeatmapAnnotation(patient = patients, 
+                        site = sites, 
+                        group = groups, 
+                        AR_Module = as.numeric(sapply(avg_exp[cns], '[',"AR Module")), 
+                        Inflammation_Module = as.numeric(sapply(avg_exp[cns], '[',"Inflammation Module")), 
+                        NE1_Module = as.numeric(sapply(avg_exp[cns], '[',"NE1 Module")), 
+                        NE2_Module = as.numeric(sapply(avg_exp[cns], '[',"NE2 Module")), 
+                        Cycling_Modle  = as.numeric(sapply(avg_exp[cns], '[',"Cycling Module")), 
+                        Glycolysis_Module = as.numeric(sapply(avg_exp[cns], '[',"Glycolysis Module")), 
+                        col = list(patient = setNames(brewer.set1(9), unique(patients)),
+                                   site = setNames(brewer.set3(9), unique(sites)), 
+                                   group = setNames(c("indianred", "seagreen","steelblue2"), c("AD", "Mixed", "NE")),
+                                   AR_Module = colorRamp2(c(-0.5, 1), c( "white", "dodgerblue3")),
+                                   Inflammation_Module = colorRamp2(c(0, 0.6), c( "white", "#D95F02")),
+                                   NE1_Module = colorRamp2(c(-0.2, 0.6), c( "white", "#7570B3")), 
+                                   NE2_Module = colorRamp2(c(0, 0.6), c( "white", "#E7298A")),
+                                   Cycling_Modle  =colorRamp2(c(-0.05, 0.15), c( "white", "#66A61E")),
+                                   Glycolysis_Module =colorRamp2(c(-0.4, 0.4), c( "white", "#E6AB02"))))
+
+ha3 = HeatmapAnnotation(patient = patients, 
+                        site = sites, 
+                        group = groups, 
+                        FOLH1 = avg_expression$FOLH1[match(cns, avg_expression$sample)], 
+                        AR = avg_expression$AR[match(cns, avg_expression$sample)], 
+                        col = list(patient = setNames(brewer.set1(9), unique(patients)),
+                                   site = setNames(brewer.set3(9), unique(sites)), 
+                                   group = setNames(c("indianred", "seagreen","steelblue2"), c("AD", "Mixed", "NE")),
+                                   AR = colorRamp2(c(0, 3), c( "white", "dodgerblue3")),
+                                   FOLH1 = colorRamp2(c(0, 3), c( "white", "#E7298A"))))
+```
+
+```{r alter_fun}
+alter_fun = list(
+  background = function(x, y, w, h) 
+    grid.rect(x, y, w*0.9, h*0.9, gp = gpar(fill = "#CCCCCC", col = NA)),
+  # red rectangles
+  enriched = function(x, y, w, h) 
+    grid.rect(x, y, w*0.9, h*0.9, gp = gpar(fill = "red", col = NA))
+)
+```
+
+
+# enriched LR pair with general cell type annotaions 
+## Tumour as receiver
+```{r}
+mats <- lapply(list.files("enrichedLR", full.names = T, pattern = "[0-9+].Rds"), readRDS)
+names(mats) <- gsub(".Rds", "", list.files("enrichedLR", pattern = "[0-9+].Rds"))
+mats <- lapply(mats, function(df) df %>% filter(source!=target) %>% filter(target == "Tumour") %>% filter(prob > 0.05) %>% mutate(ID = paste(source, interaction_name_2, sep = ":")))
+for (i in names(mats)){
+  mats[[i]] <- mats[[i]] %>% filter(! source %in% cellcountdf$cell_anno[cellcountdf$sample ==i & cellcountdf$n <10])
+}
+annotations <- rbindlist(mats) %>% select("interaction_name_2", "annotation") %>% distinct()
+pathways <- rbindlist(mats) %>% select("interaction_name_2", "pathway_name") %>% distinct()
+anno_col <- setNames(brewer.accent(4),unique(annotations$annotation))
+```
+
+### cell type specific LR matrix
+```{r}
+# all_cols <- unique(unlist(lapply(mats, function(x) unique(as.character(x$source)))))
+# all_rows <- unique(unlist(lapply(mats, function(x) unique(as.character(x$interaction_name_2)))))
+# mat <- generate_feature_mat(mats, all_cols, all_rows, formula = "interaction_name_2~source")
+# htmat <- t(mat[, colMeans(mat)>mean(colMeans(mat)[colMeans(mat)>0]) ])
+
+all_rows <- lapply(mats, function(x) paste(x$source, x$interaction_name_2, sep = ":"))
+htmat<- matrix(0, ncol =33, nrow = 99, dimnames = list(unique(unlist(all_rows)), names(mats)))
+for(i in names(mats)){
+  htmat[all_rows[[i]], i] <- mats[[i]]$prob
+}
+
+celltypes= sapply(strsplit(rownames(htmat), split = ":"), '[',1)
+opmat <- ifelse(htmat>0, "enriched", "")
+```
+
+#### By Signature score
+```{r}
+row_ord <- ifelse(htmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(AR_signature)][, 1:13])
+row_pos_score <- rowSums(row_ord[, order(AR_signature)][, 14:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"AR+", ifelse(row_pos_score==0&row_neg_score>0, "NE+", "Mixed"))
+ind <- row_group %in%c("AR+", "NE+") & rowSums(htmat>0)>2 & apply(htmat, 1, function(x) n_distinct(patients[x>0])>1)
+```
+
+```{r fig.height=7, fig.width=9}
+ra2 = rowAnnotation(celltype = celltypes[ind], 
+                   annotation_name_side = "top", 
+                   col = list(celltype =normal_cols))
+rns <- sapply(strsplit(rownames(htmat), split = ":"), "[", 2)[ind]
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+pathanno <- pathways$pathway_name[match(rns, annotations$interaction_name_2)]
+rns <- paste(pathanno, rns, sep = ":")
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = anno_col))
+```
+
+
+```{r fig.height=7, fig.width=9}
+op <- oncoPrint(opmat[ind, , drop = F], alter_fun = alter_fun, 
+                show_row_names = F,
+                column_order = order(AR_signature),
+                top_annotation = ha, 
+                left_annotation = ra2,
+                right_annotation = ra,
+                row_split = row_group[ind],
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+draw(op)
+```
+```{r fig.height=6, fig.width=9}
+ht <- Heatmap(htmat[ind, , drop = F], name = "Probability",
+        col = colorRamp2(c(0, max(htmat[ind, , drop = F])), c("grey88", "red")),
+                show_row_names = F,
+        rect_gp = gpar(col = "white", lwd = 1),
+                column_order = order(AR_signature),
+                top_annotation = ha, 
+                left_annotation = ra2,
+                right_annotation = ra,
+                row_split = row_group[ind], 
+        show_column_names = F)
+draw(ht, , 
+     heatmap_legend_side = "bottom", 
+     annotation_legend_side = "bottom")
+```
+```{r}
+Heatmap(htmat, name = "Probability",
+        col = colorRamp2(c(0, max(htmat[ind, , drop = F])), c("grey88", "red")),
+                show_row_names = T,
+        rect_gp = gpar(col = "white", lwd = 1),
+                column_order = order(AR_signature),
+                top_annotation = ha, 
+              column_split = sites,
+                row_split = row_group, 
+        show_column_names = F)
+```
+
+```{r}
+pdf("heatmap/tumour_as_receiver_LR_bycelltype.pdf", width = 9, height =6)
+draw(op)
+draw(ht, , 
+     heatmap_legend_side = "bottom", 
+     annotation_legend_side = "bottom")
+# draw(ht2, column_title = "Tumour as receiver", column_title_gp = gpar(fontsize = 14, fontface = "bold"))
+dev.off()
+
+
+```
+
+#### By Module score
+```{r}
+row_ord <- ifelse(htmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module")))][, 1:13])
+row_pos_score <- rowSums(row_ord[, order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module")))][, 14:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"AR+", ifelse(row_pos_score==0&row_neg_score>0, "NE+", "Mixed"))
+row_group <- row_group[rownames(opmat)]
+```
+
+```{r}
+ind <- row_group %in%c("AR+", "NE+") & rowSums(htmat>0)>2
+
+ra2 = rowAnnotation(celltype = celltypes[ind], 
+                   annotation_name_side = "top", 
+                   col = list(celltype =normal_cols))
+rns <- sapply(strsplit(rownames(htmat), split = ":"), "[", 2)[ind]
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+pathanno <- pathways$pathway_name[match(rns, annotations$interaction_name_2)]
+rns <- paste(pathanno, rns, sep = ":")
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = setNames(brewer.accent(n_distinct(anno)),unique(anno))))
+
+op <- oncoPrint(opmat[ind, ], alter_fun = alter_fun, 
+                show_row_names = F,
+                column_order = order(as.numeric(sapply(avg_exp[colnames(htmat)], '[',"AR Module"))),
+                top_annotation = ha2, 
+                left_annotation = ra2,
+                right_annotation = ra,
+                row_split = row_group[ind],
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+
+```
+```{r}
+pdf("heatmap/tumour_as_receiver_LR_bycelltype_bymodulescore.pdf", width = 9, height = 6)
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+# draw(ht2, column_title = "Tumour as receiver", column_title_gp = gpar(fontsize = 14, fontface = "bold"))
+dev.off()
+```
+#### rank by FOLH1
+```{r}
+row_ord <- ifelse(htmat>0 , 1, 0)
+# row_neg_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 1:11])
+# row_pos_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 23:33])
+# row_mid_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 12:22])
+# row_group <- ifelse(row_pos_score>0&row_neg_score==0&row_mid_score==0,"FOLH1 high", ifelse(row_pos_score==0&row_neg_score>0&row_mid_score==0, "FOLH1 low", 
+#                                                                                            ifelse(row_pos_score==0&row_neg_score==0&row_mid_score>0, "FOLH1 mid", "Mixed")))
+
+row_neg_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 1:17])
+row_pos_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 18:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"FOLH1 high", ifelse(row_pos_score==0&row_neg_score>0, "FOLH1 low", "Mixed"))
+row_group <- row_group[rownames(opmat)]
+```
+
+```{r}
+ind <- row_group %in% c("FOLH1 high", "FOLH1 low","FOLH1 mid")&rowSums(htmat>0)>2
+ra2 = rowAnnotation(celltype = celltypes[ind], 
+                   annotation_name_side = "top", 
+                   col = list(celltype =normal_cols))
+rns <- sapply(strsplit(rownames(htmat), split = ":"), "[", 2)[ind]
+
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+pathanno <- pathways$pathway_name[match(rns, annotations$interaction_name_2)]
+rns <- paste(pathanno, rns, sep = ":")
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = anno_col))
+
+op <- oncoPrint(opmat[ind, ], alter_fun = alter_fun, 
+                show_row_names = F,
+                column_order = order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)]),
+                top_annotation = ha3, 
+                right_annotation = ra,
+                left_annotation = ra2,
+                row_split = row_group[ind],
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+
+```
+
+
+```{r}
+pdf("heatmap/tumour_as_receiver_LR_bycelltype_rankFOLH1.pdf", width =6, height = 4)
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+
+# draw(ht2, column_title = "Tumour as receiver", column_title_gp = gpar(fontsize = 14, fontface = "bold"))
+dev.off()
+```
+
+
+
+```{r celltype LR pca, fig.height=6, fig.width=6}
+g1 <- pcaplot(feature_mat = mat)+ plot_annotation(title = "Tumour as receiver")+plot_layout(ncol = 2)
+g1
+ggsave("pca/tumour_as_receiver_LR.pdf", width = 6, height = 6)
+
+```
+
+Correlate the contribution of singaling to expression of signature
+```{r}
+keep_var <- function(m) m[, apply(m, 2, var, na.rm=TRUE) > 0]
+mat_clean <- keep_var(mat)
+avg_exp_mat  <- sapply(avg_exp, as.matrix)
+avg_exp_mat <- t(avg_exp_mat)
+avg_exp_mat <- as.data.frame(avg_exp_mat)
+colnames(avg_exp_mat) <- names(clean_module)
+avg_exp_mat <- as.matrix(avg_exp_mat)[rownames(mat),]
+res <- corr.test(mat_clean, avg_exp_mat, method = "spearman", adjust = "BH")
+
+cor_mat <- res$r   # The correlation coefficients
+p_mat   <- res$p   # The p-values
+
+valid_rows <- apply(cor_mat, 1, function(x) !all(is.na(x)))
+valid_cols <- apply(cor_mat, 2, function(x) !all(is.na(x)))
+
+cor_mat <- cor_mat[valid_rows, valid_cols]
+p_mat <- p_mat[valid_rows, valid_cols]
+ind <- apply(p_mat, 1, function(x) any(x < 0.05, na.rm = TRUE))
+cor_mat <- cor_mat[ind, ]
+p_mat <- p_mat[ind, ]
+```
+```{r fig.height=12, fig.width=12}
+get_sig_code <- function(p) {
+  if(is.na(p)) return("")
+  if(p < 0.001) return("***")
+  if(p < 0.01) return("**")
+  if(p < 0.05) return("*")
+  return("")
+}
+celltypes= sapply(strsplit(rownames(cor_mat), split = ":"), '[',1)
+ra2 = rowAnnotation(celltype = celltypes, 
+                   annotation_name_side = "top", 
+                   col = list(celltype =normal_cols))
+rns <- sapply(strsplit(rownames(cor_mat), split = ":"), "[", 2)
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+pathanno <- pathways$pathway_name[match(rns, annotations$interaction_name_2)]
+rns <- paste(pathanno, rns, sep = ":")
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = anno_col))
+```
+
+
+```{r fig.height=6, fig.width=8}
+Heatmap(cor_mat,
+        name = "Correlation",
+        col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+        
+        # Draw borders
+        rect_gp = gpar(col = "white", lwd = 1),
+        
+        # --- THE MAGIC PART: Add P-values/Stars ---
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          # Extract p-value for this specific cell
+          p_val <- p_mat[i, j]
+          
+          # Get the star code
+          sig_text <- get_sig_code(p_val)
+          
+          # Draw the text on top of the heatmap cell
+          grid.text(sig_text, x, y, gp = gpar(fontsize = 12))
+        },
+        # ------------------------------------------
+        
+        left_annotation = ra2, 
+        right_annotation = ra, 
+        show_row_names = F,
+        cluster_rows = T,
+        cluster_columns = T)
+```
+
+
+
+### all LR ranking by signatures
+```{r}
+all_LR <- lapply(mats, function(x) unique(as.character(x$interaction_name_2)))
+htmat <- matrix(0, ncol =33, nrow = n_distinct(unlist(all_LR)), dimnames = list(unique(unlist(all_LR)), names(mats)))
+avg_prob <- lapply(mats, function(x) x %>% group_by(interaction_name_2) %>% summarise(avg_prob = mean(prob)))
+for(i in names(mats)){
+  htmat[all_LR[[i]], i] <- avg_prob[[i]]$avg_prob[match(all_LR[[i]], avg_prob[[i]]$interaction_name_2)]
+}
+
+n_celltype <- lapply(mats, function(x) x%>% group_by(interaction_name_2, source) %>% summarise(n = n()))
+n_celltype <- rbindlist(n_celltype, fill = T, idcol = "sample")  
+n_celltype <- n_celltype %>% group_by(interaction_name_2) %>% mutate(sum = sum(n)) %>% group_by(interaction_name_2, source) %>% mutate(celltype_sum = sum(n)) %>%  mutate(prob = celltype_sum/sum) %>% select(interaction_name_2, source, prob) %>% distinct()
+celltype_mat <- as.matrix(xtabs(prob ~ interaction_name_2 + source, data = n_celltype))
+
+rowSums(celltype_mat)
+```
+
+```{r}
+row_ord <- ifelse(htmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(AR_signature)][, 1:13])
+row_pos_score <- rowSums(row_ord[, order(AR_signature)][, 14:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"AR+", ifelse(row_pos_score==0&row_neg_score>0, "NE+", "Mixed"))
+ind <- row_group %in%c("AR+", "NE+", "Mixed") & rowSums(htmat>0)>2 & apply(htmat, 1, function(x) n_distinct(patients[x>0])>1)
+```
+
+```{r fig.height=7, fig.width=9}
+
+rns <- rownames(htmat[ind, ])
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+pathanno <- pathways$pathway_name[match(rns, annotations$interaction_name_2)]
+
+ra = rowAnnotation(annotation = anno, 
+                   celltype = anno_barplot(celltype_mat[rns, ], 
+                   bar_width = 1, width = unit(2, "cm"),
+    gp = gpar(fill = normal_cols[colnames(celltype_mat)], col = "white")), 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(1, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = anno_col))
+
+```
+
+```{r fig.height=6, fig.width=9}
+ht <- Heatmap(htmat[ind, , drop = F], name = "Probability",
+        col = colorRamp2(c(0, max(htmat[ind, , drop = F])), c("grey88", "red")),
+                show_row_names = F,
+        rect_gp = gpar(col = "white", lwd = 1),
+                column_order = order(AR_signature),
+                top_annotation = ha, 
+                right_annotation = ra,
+                row_split = row_group[ind], 
+        show_column_names = F,
+        heatmap_legend_param = list(title = "Probability", direction = "horizontal"))
+draw(ht,merge_legend = T , 
+     heatmap_legend_side = "bottom", 
+     annotation_legend_side = "bottom")
+```
+
+
+```{r}
+pdf("heatmap/tumour_as_receiver_LR_bycelltype_bysignature.pdf", width = 8, height = 5)
+draw(ht,merge_legend = T , 
+     show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+dev.off()
+```
+
+```{r}
+lgd = Legend(labels = names(normal_cols), legend_gp = gpar(fill = normal_cols), 
+    title = "cell type", ncol = 1)
+draw(lgd)
+normal_cols
+```
+
+### focus on enrichemnt of receptors on tumour
+#### by module score
+```{r}
+mats <- lapply(list.files("enrichedLR", full.names = T, pattern = "[0-9+].Rds"), readRDS)
+names(mats) <- gsub(".Rds", "", list.files("enrichedLR", pattern = "[0-9+].Rds"))
+mats <- lapply(mats, function(df) df %>% filter(source!=target) %>% filter(target == "Tumour") %>% filter(prob > 0.05))
+for (i in names(mats)){
+  mats[[i]] <- mats[[i]] %>% filter(! source %in% cellcountdf$cell_anno[cellcountdf$sample ==i & cellcountdf$n <10])
+}
+annotations <- rbindlist(mats) %>% select("receptor", "annotation") %>% distinct()
+pathways <- rbindlist(mats) %>% select("pathway_name", "annotation") %>% distinct()
+all_receptor<- lapply(mats, function(x) unique(as.character(x$receptor)))
+avg_prob <- lapply(mats, function(x) {
+  df <- x %>% group_by(receptor) %>% summarise(mean = mean(prob)) 
+  return(setNames(df$mean, df$receptor))
+})
+
+
+rmat <- matrix(0, ncol =33, nrow = n_distinct(unlist(all_receptor)), dimnames = list(unique(unlist(all_receptor)), names(mats)))
+for(i in names(mats)){
+  rmat[names(avg_prob[[i]]), i] <- avg_prob[[i]]
+}
+
+
+opmat <- ifelse(rmat>0 , "enriched", "")
+```
+
+```{r}
+row_ord <- ifelse(rmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module")))][, 1:13])
+row_pos_score <- rowSums(row_ord[, order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module")))][, 14:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"AR+", ifelse(row_pos_score==0&row_neg_score>0, "NE+", "Mixed"))
+row_group <- row_group[rownames(opmat)]
+```
+
+```{r fig.height=4, fig.width=9}
+ind <- row_group %in%c("AR+", "NE+", "Mixed") & rowSums(rmat>0)>2 & apply(rmat, 1, function(x) n_distinct(patients[x>0])>1)
+anno <- annotations$annotation[match(rownames(opmat)[ind], annotations$receptor)]
+pathanno <- pathways$pathway_name[match(rownames(opmat)[ind], annotations$receptor)]
+rns <- paste(pathanno, rownames(opmat)[ind], sep = ":")
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = anno_col))
+
+op <- oncoPrint(opmat[ind, ], alter_fun = alter_fun, 
+                show_row_names = F,
+                column_order = order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module"))),
+                top_annotation = ha2, 
+                row_split = row_group[ind],
+                 right_annotation = ra,
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+
+```
+```{r}
+pdf("heatmap/tumour_as_receiver_receptorenriched_bymodulescore.pdf", width = 9, height = 4)
+draw(op, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+dev.off()
+```
+
+#### by signature
+```{r}
+row_ord <- ifelse(rmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(AR_signature)][, 1:13])
+row_pos_score <- rowSums(row_ord[,order(AR_signature)][, 14:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"AR+", ifelse(row_pos_score==0&row_neg_score>0, "NE+", "Mixed"))
+row_group <- row_group[rownames(opmat)]
+```
+
+```{r fig.height=6, fig.width=9}
+ind <- row_group %in%c("AR+", "NE+", "Mixed") & rowSums(rmat>0)>2 & apply(rmat, 1, function(x) n_distinct(patients[x>0])>1)
+anno <- annotations$annotation[match(rownames(opmat)[ind], annotations$receptor)]
+pathanno <- pathways$pathway_name[match(rownames(opmat)[ind], annotations$receptor)]
+rns <- paste(rownames(opmat)[ind], sep = ":")
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(1, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = anno_col))
+
+ht <- Heatmap(rmat[ind, , drop = F], name = "Probability",
+        col = colorRamp2(c(0, max(htmat[ind, , drop = F])), c("grey88", "red")),
+                show_row_names = F,
+        rect_gp = gpar(col = "white", lwd = 1),
+                column_order = order(AR_signature),
+                top_annotation = ha, 
+                right_annotation = ra,
+                column_split = sites, 
+        show_column_names = F,
+        heatmap_legend_param = list(title = "Probability", direction = "horizontal"))
+draw(ht)
+```
+```{r}
+pdf("heatmap/tumour_as_receiver_receptorenriched_bysignature.pdf", width = 8, height =5)
+draw(ht, show_heatmap_legend = FALSE, 
+     show_annotation_legend = FALSE)
+dev.off()
+```
+```{r}
+oncoPrint(opmat, alter_fun = alter_fun, 
+                show_row_names = T,
+                column_order = order(AR_signature),
+                top_annotation = ha, 
+                row_split = row_group,
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+```
+
+```{r}
+srt <- readRDS("~/snRNA/integration/tumor_only_ruvsrt.Rds")
+f <- FeaturePlot(srt, c("NLGN1", "LRRTM4","CADM1"), ncol = 3)
+f <- coneraxes(f, print = F)
+
+v1 <- VlnPlot(srt, c("NLGN1", "LRRTM4","CADM1" ), group.by = "patient")
+v2 <- VlnPlot(srt, c("NLGN1", "LRRTM4","CADM1"), group.by = "site", cols = site_cols)
+
+f/v1/v2
+ggsave("tumour_receptor_expression.pdf", width = 9, height = 8)
+```
+
+## Tumour as sender
+```{r}
+mats <- lapply(list.files("enrichedLR", full.names = T, pattern = "[0-9+].Rds"), readRDS)
+names(mats) <- gsub(".Rds", "", list.files("enrichedLR", pattern = "[0-9+].Rds"))
+mats <- lapply(mats, function(df) df %>% filter(source!=target) %>% filter(source== "Tumour"))
+annotations <- rbindlist(mats) %>% select("interaction_name_2", "annotation") %>% distinct()
+```
+
+### cell type specific LR matrix
+```{r}
+all_cols <- unique(unlist(lapply(mats, function(x) unique(as.character(x$target)))))
+all_rows <- unique(unlist(lapply(mats, function(x) unique(as.character(x$interaction_name_2)))))
+mat <- generate_feature_mat(mats, all_cols, all_rows, formula = "interaction_name_2~target")
+htmat <- t(mat[, colMeans(mat)>mean(colMeans(mat)[colMeans(mat)>0]) ])
+celltypes= sapply(strsplit(rownames(htmat), split = ":"), '[',1)
+opmat <- ifelse(htmat>0, "enriched", "")
+```
+
+```{r}
+row_ord <- ifelse(htmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module")))][, 1:13])
+row_pos_score <- rowSums(row_ord[, order(as.numeric(sapply(avg_exp[colnames(opmat)], '[',"AR Module")))][, 14:33])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0,"AR+", ifelse(row_pos_score==0&row_neg_score>0, "NE+", "Mixed"))
+row_group <- row_group[rownames(opmat)]
+```
+
+```{r}
+ind <- row_group %in%c("AR+", "NE+") & rowSums(htmat>0)>3
+
+ra2 = rowAnnotation(celltype = celltypes[ind], 
+                   annotation_name_side = "top", 
+                   col = list(celltype =normal_cols))
+rns <- sapply(strsplit(rownames(htmat), split = ":"), "[", 2)[ind]
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = setNames(brewer.accent(n_distinct(anno)),unique(anno))))
+
+op <- oncoPrint(opmat[ind, ], alter_fun = alter_fun, 
+                show_row_names = F,
+                column_order = order(as.numeric(sapply(avg_exp[colnames(htmat)], '[',"AR Module"))),
+                top_annotation = ha2, 
+                left_annotation = ra2,
+                right_annotation = ra,
+                row_split = row_group[ind],
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+draw(op, merge_legend = T)
+
+```
+```{r}
+pdf("heatmap/tumour_as_sender_LR_bycelltype.pdf", width = 12, height = 10)
+draw(op, merge_legend = T)
+# draw(ht2, column_title = "Tumour as receiver", column_title_gp = gpar(fontsize = 14, fontface = "bold"))
+dev.off()
+```
+#### rank by FOLH1
+```{r}
+row_ord <- ifelse(htmat>0 , 1, 0)
+row_neg_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 1:11])
+row_pos_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 23:33])
+row_mid_score <- rowSums(row_ord[, order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)])][, 12:22])
+row_group <- ifelse(row_pos_score>0&row_neg_score==0&row_mid_score==0,"FOLH1 high", ifelse(row_pos_score==0&row_neg_score>0&row_mid_score==0, "FOLH1 low", 
+                                                                                           ifelse(row_pos_score==0&row_neg_score==0&row_mid_score>0, "FOLH1 mid", "Mixed")))
+row_group <- row_group[rownames(opmat)]
+```
+
+```{r}
+ind <- row_group %in% c("FOLH1 high", "FOLH1 low","FOLH1 mid")&rowSums(htmat>0)>3
+ra2 = rowAnnotation(celltype = celltypes[ind], 
+                   annotation_name_side = "top", 
+                   col = list(celltype =normal_cols))
+rns <- sapply(strsplit(rownames(htmat), split = ":"), "[", 2)[ind]
+
+anno <- annotations$annotation[match(rns, annotations$interaction_name_2)]
+ra = rowAnnotation(annotation = anno, 
+                   LR = anno_text(rns, 
+                    gp = gpar(fontsize = 12), 
+                    just = "left"),
+                  gap = unit(0, "mm"),
+                  show_annotation_name = FALSE,
+                   col = list(annotation = setNames(brewer.accent(9)[seq(n_distinct(anno))],unique(anno))))
+
+op <- oncoPrint(opmat[ind, ], alter_fun = alter_fun, 
+                show_row_names = F,
+                column_order = order(avg_expression$FOLH1[match(colnames(htmat), avg_expression$sample)]),
+                top_annotation = ha3, 
+                right_annotation = ra,
+                left_annotation = ra2,
+                row_split = row_group[ind],
+                heatmap_legend_param = list(title = "CellChat\nResults", direction = "horizontal"))
+draw(op, merge_legend = T)
+```
+```{r}
+pdf("heatmap/tumour_as_sender_LR_bycelltype_FOLH1rank.pdf", width = 12, height = 4)
+draw(op, merge_legend = T)
+dev.off()
+```
+
+# enriched pathway matrix with general cell type annotaions 
+## Tumour as receiver
+```{r}
+mats <- lapply(list.files("enrichedpathway", full.names = T, pattern = "[0-9+].Rds"), readRDS)
+names(mats) <- gsub(".Rds", "", list.files("enrichedpathway", pattern = "[0-9+].Rds"))
+mats <- lapply(mats, function(df) df %>% filter(source!=target) %>% filter(target == "Tumour") %>% filter(prob >0.05))
+for (i in names(mats)){
+  mats[[i]] <- mats[[i]] %>% filter(! source %in% cellcountdf$cell_anno[cellcountdf$sample ==i & cellcountdf$n <10])
+}
+all_cols <- unique(unlist(lapply(mats, function(x) unique(x$source))))
+all_rows <- lapply(mats, function(x) unique(x$pathway_name))
+mat<- matrix(0, ncol =33, nrow = n_distinct(unlist(all_rows)), dimnames = list(unique(unlist(all_rows)), names(mats)))
+
+avg_prob <- lapply(mats, function(x) x %>% group_by(pathway_name) %>% summarise(avg_prob = mean(prob)))
+for(i in names(mats)){
+  mat[all_rows[[i]], i] <- avg_prob[[i]]$avg_prob[match(all_rows[[i]], avg_prob[[i]]$pathway_name)]
+}
+
+n_celltype <- lapply(mats, function(x) x%>% group_by(pathway_name, source) %>% summarise(n = n()))
+n_celltype <- rbindlist(n_celltype, fill = T, idcol = "sample")  
+n_celltype <- n_celltype %>% group_by(pathway_name) %>% mutate(sum = sum(n)) %>% group_by(pathway_name, source) %>% mutate(celltype_sum = sum(n)) %>%  mutate(prob = celltype_sum/sum) %>% select(pathway_name, source, prob) %>% distinct()
+celltype_mat <- as.matrix(xtabs(prob ~ pathway_name + source, data = n_celltype))
+
+```
+Correlate the contribution of singaling to expression of signature
+```{r}
+keep_var <- function(m) m[, apply(m, 2, var, na.rm=TRUE) > 0]
+mat_clean <- keep_var(t(mat))
+avg_exp_mat  <- sapply(avg_exp, as.matrix)
+avg_exp_mat <- t(avg_exp_mat)
+avg_exp_mat <- as.data.frame(avg_exp_mat)
+colnames(avg_exp_mat) <- names(clean_module)
+avg_exp_mat <- as.matrix(avg_exp_mat)[colnames(mat),]
+res <- corr.test(mat_clean, avg_exp_mat, method = "spearman", adjust = "BH")
+
+cor_mat <- res$r   # The correlation coefficients
+p_mat   <- res$p   # The p-values
+
+valid_rows <- apply(cor_mat, 1, function(x) !all(is.na(x)))
+valid_cols <- apply(cor_mat, 2, function(x) !all(is.na(x)))
+
+cor_mat <- cor_mat[valid_rows, valid_cols]
+p_mat <- p_mat[valid_rows, valid_cols]
+ind <- apply(p_mat, 1, function(x) any(x < 0.05, na.rm = TRUE))
+cor_mat <- cor_mat[ind, ]
+p_mat <- p_mat[ind, ]
+```
+```{r fig.height=12, fig.width=12}
+get_sig_code <- function(p) {
+  if(is.na(p)) return("")
+  if(p < 0.001) return("***")
+  if(p < 0.01) return("**")
+  if(p < 0.05) return("*")
+  return("")
+}
+celltypes= sapply(strsplit(rownames(cor_mat), split = ":"), '[',1)
+ra2 = rowAnnotation(celltype = anno_barplot(celltype_mat[rownames(cor_mat), ], 
+                   bar_width = 1, width = unit(2, "cm"),
+    gp = gpar(fill = normal_cols[colnames(celltype_mat)], col = "white")), 
+                   annotation_name_side = "top")
+
+```
+
+
+```{r fig.height=6, fig.width=6}
+ht <- Heatmap(cor_mat,
+        name = "Correlation",
+        col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+        
+        # Draw borders
+        rect_gp = gpar(col = "white", lwd = 1),
+        
+        # --- THE MAGIC PART: Add P-values/Stars ---
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          # Extract p-value for this specific cell
+          p_val <- p_mat[i, j]
+          
+          # Get the star code
+          sig_text <- get_sig_code(p_val)
+          
+          # Draw the text on top of the heatmap cell
+          grid.text(sig_text, x, y, gp = gpar(fontsize = 12))
+        },
+        # ------------------------------------------
+        
+        left_annotation = ra2, 
+        show_row_names = T,
+        cluster_rows = T,
+        cluster_columns = T)
+draw(ht)
+pdf("heatmap/correlation_module.pdf", width = 8, height = 6)
+draw(ht)
+dev.off()
+```
+
+```{r}
+lgd = Legend(labels = unique(unlist(apply(celltype_mat[rownames(cor_mat), ], 1, function(x) names(which(x>0))))), legend_gp = gpar(fill = normal_cols[unique(unlist(apply(celltype_mat[rownames(cor_mat), ], 1, function(x) names(which(x>0)))))]), 
+    title = "cell type", ncol = 1)
+draw(lgd)
+normal_cols
+```
+
+
