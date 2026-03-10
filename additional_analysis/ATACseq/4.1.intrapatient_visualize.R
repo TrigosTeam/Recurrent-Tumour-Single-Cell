@@ -9,7 +9,7 @@ source("~/CASCADEpaper/paper/cols.R")
 clean_module <- readRDS("~/CASCADEpaper/paper/Fig5_archetype/clean_module.Rds")
 names(clean_module) <- c("AR", "Inflammation", "NE1", "NE2", "Cycling", "Glycolysis")
 
-load("/trigos_team/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
+load("~/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
 genelist <- lapply(all_gene_sets, function(x) unique(unlist(x))) # union of different signatures
 
 tang_2022 <- all_gene_sets$tang_2022

@@ -35,8 +35,8 @@ net <- dorothea_hs %>% dplyr::filter(confidence != "D") %>% dplyr::select(tf, ta
 annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
 seqlevels(annotation) <- paste0('chr', seqlevels(annotation))
 
-paths2 <- system("realpath /trigos_team/CASCADE/SingleCell/CA*/*/multiome/*/outs/raw_feature_bc_matrix.h5", intern = T)
-#paths2.2 <- system("realpath /trigos_team/CASCADE/SingleCell/CA*/*/*/outs/raw_feature_bc_matrix.h5", intern = T)
+paths2 <- system("realpath ~/CASCADE/SingleCell/CA*/*/multiome/*/outs/raw_feature_bc_matrix.h5", intern = T)
+#paths2.2 <- system("realpath ~/CASCADE/SingleCell/CA*/*/*/outs/raw_feature_bc_matrix.h5", intern = T)
 #paths2 <- c(paths2, paths2.2)
 paths_split <- unlist(lapply(strsplit(paths2, split = "/"), function(x) paste(x[5], x[6], sep = "_")))
 paths2 <- setNames(paths2, paths_split)
@@ -44,9 +44,9 @@ paths2 <- setNames(paths2, paths_split)
 fragpath <- paste0(unlist(lapply(strsplit(paths2, split = "/"), function(x) paste(x[1:(length(x)-1)], collapse  = "/"))), "/atac_fragments.tsv.gz")
 fragpath <- setNames(fragpath, paths_split)
 
-paths <- system("realpath /trigos_team/CASCADE/Analysis/230113_seurat_intron/*/*/*non_tumour_removed.Rds", intern = T)
+paths <- system("realpath ~/CASCADE/Analysis/230113_seurat_intron/*/*/*non_tumour_removed.Rds", intern = T)
 paths_split <- unlist(lapply(strsplit(paths, split = "/"), function(x) paste(x[6], x[7], sep = "_")))
-paths3 <- system("realpath /trigos_team/CASCADE/Analysis/240603_seurat_intron/CA0027/dura*/*non_tumour_removed_v4.Rds", intern = T)
+paths3 <- system("realpath ~/CASCADE/Analysis/240603_seurat_intron/CA0027/dura*/*non_tumour_removed_v4.Rds", intern = T)
 paths_split3 <- unlist(lapply(strsplit(paths3, split = "/"), function(x) paste(x[6], x[7], sep = "_")))
 
 paths <- c(paths, paths3)

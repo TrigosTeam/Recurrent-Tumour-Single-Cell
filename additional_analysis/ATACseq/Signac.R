@@ -10,21 +10,21 @@ library(BSgenome.Hsapiens.UCSC.hg38)
 library(dplyr)
 
 
-srt_RNA <- readRDS("/trigos_team/CASCADE/Analysis/230113_seurat_intron/CA0027/dura_base_skull_13/CA0027_dura_base_skull_13_srt_new_filtering_doublets_non_tumour_removed.Rds")
-counts <- readMM("/trigos_team/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/raw_feature_bc_matrix/matrix.mtx.gz")
-features <- read_tsv("/trigos_team/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/raw_feature_bc_matrix/features.tsv.gz", col_names = F)
-cell_ids <- read_tsv("/trigos_team/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/raw_feature_bc_matrix/barcodes.tsv.gz", col_names = FALSE)$X1
+srt_RNA <- readRDS("~/CASCADE/Analysis/230113_seurat_intron/CA0027/dura_base_skull_13/CA0027_dura_base_skull_13_srt_new_filtering_doublets_non_tumour_removed.Rds")
+counts <- readMM("~/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/raw_feature_bc_matrix/matrix.mtx.gz")
+features <- read_tsv("~/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/raw_feature_bc_matrix/features.tsv.gz", col_names = F)
+cell_ids <- read_tsv("~/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/raw_feature_bc_matrix/barcodes.tsv.gz", col_names = FALSE)$X1
 View(counts)
 rownames(counts) <- features
 colnames(counts) <- cell_ids
 
 counts <- counts[, colnames(srt)]
-annotation.file = "/trigos_team/CASCADE/Analysis/reference_annotation/multiome/genes.gtf"
+annotation.file = "~/CASCADE/Analysis/reference_annotation/multiome/genes.gtf"
 
-test_mat <- Read10X_h5("/trigos_team/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/filtered_feature_bc_matrix.h5")
+test_mat <- Read10X_h5("~/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/filtered_feature_bc_matrix.h5")
 annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
 seqlevels(annotation) <- paste0('chr', seqlevels(annotation))
-fragpath <- read_tsv("/trigos_team/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/atac_fragments.tsv.gz")
+fragpath <- read_tsv("~/CASCADE/SingleCell/CA0027/dura_base_skull_13/multiome/CA0027_dura_base_skull_13_multi/outs/atac_fragments.tsv.gz")
 
 srt <- CreateSeuratObject(
   counts = test_mat$`Gene Expression`,

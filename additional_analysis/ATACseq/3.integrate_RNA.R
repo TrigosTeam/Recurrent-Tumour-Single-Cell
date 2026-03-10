@@ -75,7 +75,7 @@ pfm <- getMatrixSet(
 # DefaultAssay(combined_obj) <- "peaks"
 # combined_obj <- RegionStats(combined_obj, genome = BSgenome.Hsapiens.UCSC.hg38)
 # 
-# #load("/trigos_team/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
+# #load("~/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
 # #genelist <- lapply(all_gene_sets, function(x) unique(unlist(x)))
 # 
 # 

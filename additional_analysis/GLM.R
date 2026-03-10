@@ -8,7 +8,7 @@ library(broom.mixed)
 library(ggplot2)
 
 # public signature GLM test - assess organ, pathology effect =============
-load("/trigos_team/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
+load("~/CASCADE/Analysis/signatures_analysis/objects/all_gene_sets.rda")
 genelist <- lapply(all_gene_sets, function(x) unique(unlist(x))) # union of different signatures
 
 tang_2022 <- all_gene_sets$tang_2022
