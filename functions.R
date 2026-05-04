@@ -1,52 +1,183 @@
-rmaxes <- function(g, front.size = 18, print = T){
-  if(class(g)[1] == "patchwork"){
-    f1 <- g
-    for (i in 1:length(g)){
-      f1[[i]] <- rmaxes(f1[[i]], print = F, front.size = front.size)
-    }
-    # f1 <- lapply(f1, rmaxes, print = F)
-    f1 <- f1+plot_layout(axes = "collect")
-    if(print){
-      print(f1)
-    }
-    return(f1)
-  }else{
-  temp <- g + theme(axis.title = element_blank(), text = element_text(size = front.size),
-                    plot.margin = margin(t = 0, l = -0.3, r = 0, b = -0.3, "cm"),
-                    legend.key.size = unit(0.2,"inches"))+
-    scale_x_continuous(breaks = NULL, limits = c(min(g$data[, 1]-1), max(g$data[, 1])))+
-    scale_y_continuous(breaks = NULL, limits = c(min(g$data[, 2]-1), max(g$data[, 2])))
-  if(print){
-    print(temp)
+require(Seurat)
+require(ggplot2)
+require(patchwork)
+require(pals)
+require(ggrastr)
+require(ggpubr)
+
+
+rmaxes <- function(g, front.size = 18, print = TRUE) {
+  
+  remove_axes <- theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.text.y  = element_blank(),
+    axis.ticks   = element_blank(),
+    axis.line = element_blank(),
+    plot.margin  = margin(0, 0, 0, 0, "cm"),
+    text = element_text(size = front.size),
+    legend.key.size = unit(0.2, "inches")
+  )
+  
+  # If it's a patchwork object:
+  if (inherits(g, "patchwork")) {
+    # Apply theme to every plot inside patchwork
+    g2 <- g & remove_axes   # <-- patchwork syntax to apply theme to all subplots
+    if (print) print(g2)
+    return(g2)
   }
-  return(temp)
-  }
+  
+  # If it's a regular ggplot:
+  g2 <- g + remove_axes
+  g2 <-  rasterise(g2, layers = "Point", dpi = 300)
+  if (print) print(g2)
+  return(g2)
 }
 
-coneraxes <- function(p, labelx = "UMAP1", labely ="UMAP2", colorbar = TRUE, front.size = 18, print = T){
-  if(colorbar){
-    arr <- list(x = min(p$data[, 1])-1, y = min(p$data[, 2])-1, 
-                x_len = diff(range(p$data[, 1]))/5, y_len = diff(range(p$data[, 1]))/5)
-    f <- p + annotate("segment", 
-                      x = arr$x, xend = arr$x + c(arr$x_len, 0), 
-                      y = arr$y, yend = arr$y + c(0, arr$y_len), 
-                      arrow = arrow(type = "closed", length = unit(3, 'pt')))+
-      annotate(geom = "text", x = arr$x, y = arr$y-0.3, label = labelx, hjust = "left", vjust = "top", size = front.size/.pt)+
-      annotate(geom = "text", x = arr$x-0.3, y = arr$y, label = labely, angle = 90, hjust = "left", vjust = "bottom", size = front.size/.pt)+
-      theme(axis.title = element_blank(), text = element_text(size = front.size),
-            plot.margin = margin(t = 0, l = 0.1, r = 0, b = 0.1, "cm"),
-            legend.key.size = unit(0.2,"inches"), 
-            legend.margin = margin(l = -10, t = -10))+
-      scale_x_continuous(breaks = NULL) +
-      scale_y_continuous(breaks = NULL)+
-      coord_cartesian(clip = 'off')
-    if(print){
-    print(f)
+
+coneraxes <- function(p, which_plot = 1, labelx = "UMAP1", labely = "UMAP2", 
+                      colorbar = TRUE, front.size = 18, print = T) {
+  
+  # 1. Determine if input is a Patchwork object or a single ggplot
+  is_patchwork <- inherits(p, "patchwork")
+  
+  # 2. Select the target plot to annotate
+  if (is_patchwork) {
+    # Extract the specific plot from the patchwork list
+    target_p <- p[[which_plot]]
+  } else {
+    target_p <- p
+  }
+  
+  # 3. Apply logic to the target plot
+  if (colorbar) {
+    # Ensure we are using the data from the specific subplot
+    # Note: Assumes columns 1 and 2 are the coordinates (common in Seurat/DimPlot)
+    x_min <- min(target_p$data[, 1], na.rm = TRUE)
+    y_min <- min(target_p$data[, 2], na.rm = TRUE)
+    x_range <- diff(range(target_p$data[, 1], na.rm = TRUE))
+    
+    # Calculate arrow dimensions
+    arr <- list(
+      x = x_min - 1, 
+      y = y_min - 1, 
+      x_len = x_range / 5, 
+      y_len = x_range / 5
+    )
+    
+    # Handle the 'rmaxes' function: 
+    # Use it if it exists in your environment, otherwise manually remove axes
+    if (exists("rmaxes")) {
+      f <- rmaxes(target_p, print = FALSE)
+    } else {
+      f <- target_p + theme_void() + theme(legend.position = "none") 
     }
+    
+    # Add annotations to the subplot
+    f <- f + 
+      annotate("segment", 
+               x = arr$x, xend = arr$x + c(arr$x_len, 0), 
+               y = arr$y, yend = arr$y + c(0, arr$y_len), 
+               arrow = arrow(type = "closed", length = unit(3, 'pt'))) + 
+      
+      # X-axis Label
+      annotate(geom = "text", 
+               x = arr$x, 
+               y = arr$y - 0.2, 
+               label = labelx, 
+               hjust = "left", 
+               vjust = "top", 
+               size = 15/.pt) + 
+      
+      # Y-axis Label
+      annotate(geom = "text", 
+               x = arr$x - 0.2, 
+               y = arr$y, 
+               label = labely, 
+               angle = 90, 
+               hjust = "left", 
+               vjust = "bottom", 
+               size = 15/.pt) + 
+      
+      # Apply Theme settings
+      theme(axis.title = element_blank(), 
+            text = element_text(size = front.size),
+            plot.margin = margin(t = 0, l = 0.1, r = 0, b = 0.1, "cm"),
+            legend.key.size = unit(0.2, "inches"),
+            legend.margin = margin(l = -10, t = -10)) + 
+      scale_x_continuous(breaks = NULL) + 
+      scale_y_continuous(breaks = NULL) + 
+      coord_cartesian(clip = 'off')
+  } else {
+    # If colorbar is FALSE, just return original (or formatted) plot
+    f <- target_p
+  }
+  p <- rmaxes(p, print = F)
+  # 4. Return based on object type
+  if (is_patchwork) {
+    # Put the modified plot back into the patchwork object
+    p[[which_plot]] <- f
+    if (print) print(p)
+    return(p)
+  } else {
+    if (print) print(f)
     return(f)
   }
 }
 
+preprocess_srt <- function(srt){
+  require(Seurat)
+  require(scran)
+  DefaultAssay(srt) <- "RNA" 
+  lib.median <- median(srt$nCount_RNA)
+  target_pseudocount = 1
+  srt <- srt %>%
+    NormalizeData(scale.factor = lib.median / target_pseudocount) %>%
+    ScaleData(do.scale = FALSE)
+  set.seed(100)
+  poisson_fit <- modelGeneVarByPoisson(GetAssayData(srt, slot = "counts"), dispersion = 0.2, size.factors = target_pseudocount * srt$nCount_RNA / lib.median)
+  residuals <- poisson_fit$total - poisson_fit@metadata$trend(poisson_fit$mean)
+  names(residuals) <- rownames(srt)
+  top_genes <- rownames(srt)[order(residuals, decreasing = TRUE)]
+  
+  srt <- srt %>%
+    RunPCA(features = top_genes[1:2000]) %>%
+    FindNeighbors(dims = 1:20) %>%
+    FindClusters(resolution = 1) %>%
+    RunUMAP(dims = 1:20)
+  return(srt)
+}
+
+give_module_anno <- function(meta){
+  df <- lapply(seq(from = 45, to = 70, by =1), function(p){
+    group<- apply(meta[, 1:6], 2, function(x){
+      bins <- cut(x, breaks = 100)
+      group <- bins %in% levels(bins)[p:100]
+    })
+    ind_high <- apply(group, 1, function(x) sum(x))
+    return(as.data.frame(table(ind_high)) %>% mutate(cutoff = p))
+  })
+  df <- rbindlist(df)
+  df$cutoff <- factor(df$cutoff, levels = df %>% filter(ind_high ==1) %>% arrange(Freq) %>% pull(cutoff))
+  df %>% filter(ind_high == "1") -> subdf
+  
+  cutoff <- as.numeric(as.character(subdf$cutoff[which.max(subdf$Freq)]))
+  
+  
+  group<-  apply(meta[, 1:6], 2, function(x){
+    bins <- cut(x, breaks = 100)
+    group <- bins %in% levels(bins)[cutoff:100]
+  })
+  ind_high <- apply(group, 1, function(x) if(sum(x) > 1) data.frame( group = paste(c("AR","Inflammation", "NE1","NE2", "Cycling","Glycolysis")[x], collapse = "&"), freq = sum(x)) else if(sum(x)==1) data.frame(group = c("AR","Inflammation", "NE1","NE2", "Cycling","Glycolysis")[x], freq = 1) else data.frame(group = "background", freq = 0))
+  ind_high <- rbindlist(ind_high)
+  meta$oldgroup <- ind_high$group
+  ind <- grepl("AR&", ind_high$group)&ind_high$freq == 2
+  ind_high$group[ind] <- gsub("AR&", "",ind_high$group[ind])
+  ind_high$freq[ind] <- ind_high$freq[ind]-1
+  cat("cutoff above", cutoff, "percentile\n")
+  return(ind_high$group)
+}
 
 #### normal cell plot functions ----------
 source("~/CASCADEpaper/paper/cols.R")
@@ -64,6 +195,8 @@ fplot <- function(srt,features, title = NULL, reduction = c("css_umap", "harmony
   }
   
 }
+
+
 
 barplot_bytissue <- function(endo3){
   df <- endo3@meta.data %>% group_by(subtype, site) %>% summarise(n = n()) %>% mutate (freq = n/sum(n))
@@ -113,7 +246,7 @@ barplot_bypatient <- function(endo3){
   df$subtype <- factor(df$subtype, levels = sort(unique(endo3$subtype)))
   df$patient <- gsub("00", "", df$patient)
   df2 <- df %>% group_by(patient) %>% mutate(n = sum(n))
-
+  
   df$labs <- paste0(signif(df$freq*100, 2))
   df$labs[df$freq < 0.03] <- NA
   
@@ -291,13 +424,13 @@ preprocess_srt <- function(normal2){
   return(normal2)
 }
 
-#subc <- readRDS(paste0("~/normal_cell_annotation/subtype/", celltype, ".Rds"))
+#subc <- readRDS(paste0("~/CASCADEpaper/paper/normal_cells_202406/subtype/", celltype, ".Rds"))
 plot_subtype <- function(subc, celltype, markerlist){
   p1 <- coneraxes(DimPlot(subc, reduction = "harmony_umap", group.by = "subtype", cols = pal_observable()(6)), front.size = 16)+ theme(legend.position = "top", plot.title = element_blank())
   p2 <- DotPlot(subc, features = markerlist, group.by = "subtype")+theme(axis.text.x = element_text(hjust = 1, vjust = 1, angle = 45),
-                                                                           axis.title = element_blank(), 
-                                                                           # axis.text.y = element_text(angle = -30, hjust = 1, vjust = 1), 
-                                                                           legend.position = "none", 
+                                                                         axis.title = element_blank(), 
+                                                                         # axis.text.y = element_text(angle = -30, hjust = 1, vjust = 1), 
+                                                                         legend.position = "none", 
                                                                          panel.spacing = unit(0.1, "cm"))
   
   free(p1)+p2 +plot_layout(widths = c(1, 1.5))
@@ -310,7 +443,7 @@ plot_subtype <- function(subc, celltype, markerlist){
   
   g1 <- rmaxes(DimPlot(subc, reduction = "harmony_umap", group.by = "site")+scale_color_manual(values = site_cols)+theme(plot.title = element_blank(), legend.position = "bottom"), front.size = 26)
   g2 <- barplot_bytissue(subc)+NoLegend()
-  markers <- readRDS(paste0("~/normal_cell_annotation/subtype/",celltype,"_tissuemarker.Rds"))
+  markers <- readRDS(paste0("~/CASCADEpaper/paper/normal_cells_202406/subtype/",celltype,"_tissuemarker.Rds"))
   features <- markers %>% group_by(cluster)%>% arrange(desc(pct.1-pct.2)) %>% arrange(desc(avg_log2FC)) %>% dplyr::slice(1)
   features$cluster <- as.character(features$cluster)
   features$cluster <- factor(features$cluster, levels =sort(as.character(features$cluster)) ) 
@@ -324,5 +457,5 @@ plot_subtype <- function(subc, celltype, markerlist){
 }
 
 ##### ggplot theme ----------
-phenotype_meta <- readRDS("~/Fig6_PSMA/phenotype_meta.Rds")
+phenotype_meta <- readRDS("~/CASCADEpaper/paper/PSMA/phenotype_meta.Rds")
 xlab <- setNames(paste(phenotype_meta$site, sapply(strsplit(phenotype_meta$sample, split = "_"), function(x) tail(x, 1))), phenotype_meta$sample)
